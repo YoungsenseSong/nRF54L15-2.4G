@@ -1,0 +1,27 @@
+Experiment: 50 ksps x 16-bit stress run
+Date: 2026-04-19
+Target: 50 ksps x 16 bit = 800 kbps effective payload
+Parameters: ESB 1 Mbps, channel 40, ACK enabled, 32 samples/frame, 640 us frame period
+
+RX excerpt:
+RX stat frames=101220 samples=3239040 bps=291328 lost=150976 dup=0 bad=0 seq=60155 first=3936 last=3967
+RX stat frames=101804 samples=3257728 bps=295128 lost=151827 dup=0 bad=0 seq=61590 first=704 last=735
+RX stat frames=102382 samples=3276224 bps=293082 lost=152682 dup=0 bad=0 seq=63023 first=1504 last=1535
+RX stat frames=102948 samples=3294336 bps=286208 lost=153549 dup=0 bad=0 seq=64456 first=2304 last=2335
+RX stat frames=103527 samples=3312864 bps=291840 lost=154405 dup=0 bad=0 seq=355 first=3168 last=3199
+RX stat frames=104100 samples=3331200 bps=289280 lost=155244 dup=0 bad=0 seq=1767 first=3296 last=3327
+RX stat frames=108754 samples=3480128 bps=293888 lost=162076 dup=0 bad=0 seq=13253 first=2208 last=2239
+RX stat frames=112218 samples=3590976 bps=288768 lost=167209 dup=0 bad=0 seq=21850 first=2880 last=2911
+
+TX excerpt:
+TX stat sent=117600 ipc_rx=297485 queued=297485 q_drop=179749 rf_ok=117600 rf_fail=120 rf_timeout=0 attempts=1 mac_cnt=117720 mac_last_us=1099 mac_min_us=1087 mac_avg_us=1574 mac_max_us=11671
+TX stat sent=117700 ipc_rx=297749 queued=297749 q_drop=179913 rf_ok=117700 rf_fail=120 rf_timeout=0 attempts=1 mac_cnt=117820 mac_last_us=1090 mac_min_us=1087 mac_avg_us=1574 mac_max_us=11671
+TX stat sent=117800 ipc_rx=297994 queued=297994 q_drop=180058 rf_ok=117800 rf_fail=120 rf_timeout=0 attempts=3 mac_cnt=117920 mac_last_us=3732 mac_min_us=1087 mac_avg_us=1574 mac_max_us=11671
+TX stat sent=118400 ipc_rx=299549 queued=299549 q_drop=181013 rf_ok=118400 rf_fail=120 rf_timeout=0 attempts=1 mac_cnt=118520 mac_last_us=1089 mac_min_us=1087 mac_avg_us=1574 mac_max_us=11671
+
+Analysis:
+- RX bps stayed around 286 to 306 kbps, below the 800 kbps target.
+- RX lost increased quickly, while bad stayed 0 and dup stayed 0.
+- TX q_drop increased quickly, proving the HP RF send path could not drain the LP-produced frames.
+- TX rf_fail stayed low, so the primary bottleneck in this run was throughput/MAC timing, not corrupted packets.
+- TX MAC latency min/avg/max was about 1087/1574/11671 us, longer than the requested 640 us production period.
