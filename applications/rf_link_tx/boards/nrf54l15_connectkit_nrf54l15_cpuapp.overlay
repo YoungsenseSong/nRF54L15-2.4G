@@ -1,0 +1,75 @@
+/ {
+	chosen {
+		zephyr,console = &uart30;
+		zephyr,shell-uart = &uart30;
+	};
+
+	soc {
+		reserved-memory {
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
+
+			/* FLPR code partition */
+			cpuflpr_code_partition: image@165000 {
+				reg = <0x165000 0x18000>; /* 96 KB */
+			};
+
+			/* ICMSG shared memory: HP receives here */
+			sram_rx: memory@20018000 {
+				reg = <0x20018000 0x0800>;
+			};
+
+			/* ICMSG shared memory: HP transmits here */
+			sram_tx: memory@20020000 {
+				reg = <0x20020000 0x0800>;
+			};
+		};
+
+		/* FLPR execution SRAM */
+		cpuflpr_sram_code_data: memory@20028000 {
+			compatible = "mmio-sram";
+			reg = <0x20028000 0x18000>; /* 96 KB */
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0x0 0x20028000 0x18000>;
+		};
+
+		ipc {
+			ipc0: ipc0 {
+				compatible = "zephyr,ipc-icmsg";
+				dcache-alignment = <32>;
+				tx-region = <&sram_tx>;
+				rx-region = <&sram_rx>;
+				mboxes = <&cpuapp_vevif_rx 20>, <&cpuapp_vevif_tx 21>;
+				mbox-names = "rx", "tx";
+				status = "okay";
+			};
+		};
+	};
+};
+
+&cpuapp_sram {
+	reg = <0x20000000 0x28000>; /* 160 KB */
+	ranges = <0x0 0x20000000 0x28000>;
+};
+
+&cpuflpr_vpr {
+	status = "okay";
+	execution-memory = <&cpuflpr_sram_code_data>;
+	source-memory = <&cpuflpr_code_partition>;
+};
+
+&cpuapp_vevif_rx {
+	status = "okay";
+};
+
+&cpuapp_vevif_tx {
+	status = "okay";
+};
+
+&uart30 {
+	status = "okay";
+	current-speed = <115200>;
+	/delete-property/ hw-flow-control;
+};
