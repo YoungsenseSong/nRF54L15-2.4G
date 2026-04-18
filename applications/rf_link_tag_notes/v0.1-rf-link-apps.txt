@@ -1,0 +1,5 @@
+Version target: add runnable TX/RX application code for the private 2.4 GHz link.
+Changed modules: applications/rf_link_tx and applications/rf_link_rx.
+Runnable result: TX dual-core app and RX single-core app build with the Connect Kit target.
+Known issues: current high-rate setting is throughput-limited at 1 Mbps ESB + ACK.
+Evidence path: applications/rf_link_development_log.txt, applications/rf_link_DESIGN.md.

@@ -1,0 +1,5 @@
+Version target: add README, design notes, devlog, experiment records, and parameter table.
+Changed modules: applications/rf_link_README.md, rf_link_DESIGN.md, rf_link_development_log.txt.
+Runnable result: code is unchanged from v0.1, documentation now records scope and test evidence.
+Known issues: GitHub push depends on target repository permissions and remote configuration.
+Evidence path: applications/rf_link_tag_notes, applications/rf_link_parameter_matrix.csv.

@@ -1,0 +1,221 @@
+nRF54L15 Connect Kit 开发指南（单核 + 双核）
+
+工程文件夹是"D:\nRF54L15\NCS-Project\nrf54l15-connectkit\applications"，dual_ipc_app是双核my_app是单核
+
+1.整体认知
+
+单核开发是什么
+只让 cpuapp（HP 核） 跑一个应用。这是最基础、最容易上手的开发模式。
+
+双核开发是什么
+让：cpuapp（HP 核）：负责主控、串口输出、和 PC 通信，cpuflpr（LP 核）：负责轻量任务，比如数据生成、采样、预处理，然后两核之间通过 IPC（核间通信） 交换数据。我们最终跑通的双核链路，已经验证成功的链路是：
+LP 核生成样本包 → ICMsg 核间通信 → HP 核接收并解析 → HP 通过 UART 以 CSV 格式发给 PC
+
+2. 硬件架构
+这块板子上实际上有两层“系统”：
+1）真正跑你应用的主芯片：nRF54L15，你写的单核应用、双核应用，最后都是跑在这颗芯片上。
+2）负责下载、调试、串口桥接的接口芯片：Interface MCU
+它负责：CMSIS-DAP 调试/烧录，USB-UART 串口桥，Interface Shell，自己也有单独固件
+
+3.开发流程
+cd NCS-Project
+.\.venv\Scripts\Activate.ps1    进入虚拟环境
+cd nrf54l15-connectkit
+
+串口查看  com7
+
+真正工作的根目录是：D:\nRF54L15\NCS-Project\nrf54l15-connectkit
+
+A.Interface MCU固件更新
+
+构建
+west build -p always -b nrf54l15_connectkit/nrf52820 applications/ifmcu_firmware
+成功构建应用后，带有名称的固件可以在目录中找到。build/ifmcu_firmware/zephyr/zephyr.uf2
+
+直接拖 UF2 文件到 UF2BOOT
+
+
+B.单核开发
+
+my_app/
+├── CMakeLists.txt
+├── prj.conf
+└── src/
+    └── main.c
+
+单核编译
+west build -p always -d build_my_app -b nrf54l15_connectkit/nrf54l15/cpuapp .\applications\my_app
+west build -p always -d build_my_app -b nrf54l15_connectkit/nrf54l15/cpuapp .\applications\rf_link_rx
+
+这里的含义是：
+
+-p always：每次都尽量从干净状态重建
+
+-d build_my_app：把构建产物放到 build_my_app
+
+-b .../cpuapp：目标板卡是 Connect Kit 的 cpuapp
+
+最后那个路径：你的应用源码目录
+
+单核烧录
+west flash -d build_my_app
+（很多场景下等价于pyocd load -t nrf54l <firmware.hex>）
+west flash -d build_rf_link_rx
+
+C.双核开发
+本质，一个 HP 主应用，一个 LP 子应用，由 sysbuild 组合成一套多镜像工程
+
+dual_ipc_app/
+├── CMakeLists.txt
+├── prj.conf
+├── sysbuild.conf
+├── sysbuild.cmake
+├── src/
+│   └── main.c                        # HP 侧
+├── boards/
+│   └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
+└── flpr_app/
+    ├── CMakeLists.txt
+    ├── prj.conf
+    ├── src/
+    │   └── main.c                    # LP 侧
+    └── boards/
+        └── nrf54l15_connectkit_nrf54l15_cpuflpr.overlay
+
+顶层（HP 工程）
+CMakeLists.txt：主应用构建入口
+prj.conf：HP 侧配置
+sysbuild.conf：sysbuild 层配置
+sysbuild.cmake：把 LP 子工程挂进去
+src/main.c：HP 主逻辑
+boards/...cpuapp.overlay：CPUAPP 的 DTS 补充配置
+LP 子工程
+flpr_app/CMakeLists.txt：子应用构建入口
+flpr_app/prj.conf：LP 侧配置
+flpr_app/src/main.c：LP 逻辑
+flpr_app/boards/...cpuflpr.overlay：FLPR 的 DTS 补充配置
+
+编译
+west build -p always --sysbuild -d build_dual -b nrf54l15_connectkit/nrf54l15/cpuapp applications\dual_ipc_app
+west build -p always --sysbuild -d build_dual -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
+
+这里多出来的核心参数是：--sysbuild
+意思就是：
+这不是只编一个应用，而是编一套多镜像系统。
+
+烧录
+烧录 HP
+west flash -d build_dual --domain dual_ipc_app
+烧录 LP
+pyocd load -t nrf54l D:\nRF54L15\NCS-Project\nrf54l15-connectkit\build_dual\flpr_app\zephyr\zephyr.hex
+
+数据保存
+在nrf54l15-connectkit下python save_serial_csv.py，有文件保存，ctrl+c退出
+
+
+核间通信是怎么实现的
+1. 选择的机制
+我们最后用的是：
+Zephyr ipc_service + icmsg backend
+它本质上依赖两样东西：共享内存，MBOX/VEVIF mailbox
+2. 为什么一开始没直接通
+因为 Connect Kit 的 board support 里虽然有：
+cpuapp_vevif_rx / tx
+cpuflpr_vevif_rx / tx
+但没有现成的 zephyr,ipc-icmsg 实例。所以我们自己在两个 overlay 里补了：ipc0 节点，两块共享内存，mailbox 通道绑定
+
+四、overlay 是怎么配的
+CPUAPP overlay 做了三件事
+1. 给 ICMsg 分配共享内存
+例如：
+sram_rx
+sram_tx
+
+2. 创建 ipc0
+把 icmsg 所需的：compatible = "zephyr,ipc-icmsg"，tx-region，rx-region，mboxes，mbox-names，都配置好。
+
+3. 手动加入 FLPR 启动所需资源
+最后发现不能直接套 nordic-flpr snippet，因为它会把 uart30 reserved 给 FLPR，这样 HP 就没法往 PC 发串口了。
+所以我们改成：不再直接依赖 snippet，而是在 CPUAPP overlay 里手动加入：cpuflpr_code_partition，cpuflpr_sram_code_data，&cpuflpr_vpr { ... }
+也就是：
+手动保留 FLPR 启动能力，同时把 uart30 留给 HP。
+
+FLPR overlay 做了两件事
+1. 配置自己的 ipc0
+和 HP 侧对称：交换 tx/rx 共享内存，交换 mailbox 通道
+
+2. 保持和 HP 侧一致的 icmsg 资源映射
+
+五、HP 和 LP 两边的代码分别做了什么
+LP 侧（flpr_app/src/main.c）
+LP 的逻辑很简单：
+获取 ipc0
+ipc_service_open_instance(ipc0)
+注册 endpoint
+等待 bound
+每 500 ms 发一条消息
+核心行为就是：
+ipc_service_send(&lp_ept, msg, len + 1);
+消息内容是：数据
+
+所以 LP 的职责是：
+定时产数 + 发给 HP
+
+HP 侧（dual_ipc_app/src/main.c）
+HP 的逻辑是：
+获取 ipc0
+获取 uart30
+打开 ipc_service
+注册 endpoint
+等待 LP bind
+收到消息后，不用 printk()，而是直接调用 UART 发给 PC
+核心接收回调大概是：
+
+hp_received(...)
+{
+    memcpy(buf, data, n);
+    uart_send_string("HP RX: ");
+    uart_send_string(buf);
+    uart_send_string("\r\n");
+}
+所以 HP 的职责是：
+收 LP 数据 + 通过 uart30 发给 PC
+
+六、为什么最后不用 printk()，而改成直接 UART
+这是整个过程中最关键的一个工程决策。一开始的问题我们一直遇到：
+UART_CONSOLE got 'n'
+drivers__serial / drivers__console 被排除
+串口上只能看到 boot banner，看不到应用 printk
+这说明：双核工程里的默认 console 链路并不可靠。后来的验证我们专门做了一个 HP-only UART 最小测试工程，结果证明：
+HP 单核时直接用 uart_poll_out()可以稳定把字符串发到 PC
+所以可以确定：坏的是 printk/console，不是 HP→PC 的底层 UART 通路
+于是最后的双核工程里，我们就彻底绕开 console，改成：HP 收到消息后直接用 UART 驱动发给 PC，这一步是最终成功的关键。
+
+七、为什么 nordic-flpr snippet 不能直接照搬
+这个坑也很关键。一开始我们直接用：-S nordic-flpr
+结果是：FLPR 启动链可能带上了但 CPUAPP 的 uart30 被影响，串口驱动一直进不来
+后来定位到：官方这套 snippet 默认更偏向“给 FLPR 留 UART”，而你的需求恰恰相反：你要 HP 占用 UART，把数据发给 PC。
+所以最后我们改成：不再直接依赖整套 snippet 行为而是手动把 FLPR 启动所需的 DTS 资源搬到 overlay同时保留 uart30 给 HP
+这一步才真正让：双核启动 + HP 串口输出同时成立。
+
+双核中 HP→PC 串口发送的推荐实现
+最简单可靠的方式就是：
+uart_poll_out(uart_dev, c);
+把字符串一个字符一个字符发出去。
+这虽然不是最高性能，但对当前验证版非常稳定，而且逻辑最清楚。
+
+现在已经跑通的版本是：
+LP 发包格式
+固定长度结构体：
+magic
+seq
+count
+samples[16]
+HP 输出到 PC 的格式
+CSV：
+seq,count,s0,s1,s2,...,s15
+0,16,0,1,2,...,15
+1,16,16,17,18,...,31
+2,16,32,33,34,...,47
+这意味着你现在已经拥有一个非常实用的数据导出链路：
+LP 生成数据 → HP 收包 → PC 直接拿 CSV

@@ -1,0 +1,5 @@
+Version target: stress the link at 50 ksps x 16 bit, 800 kbps payload target.
+Changed modules: rf_link_tx/src/proto.h and flpr_app/src/main.c period changed to 640 us.
+Runnable result: application builds and runs but RX receives about 286 to 306 kbps.
+Known issues: high RX lost count and high TX q_drop under 1 Mbps ESB + ACK.
+Evidence path: applications/rf_link_experiment_records.md, Experiment 2.

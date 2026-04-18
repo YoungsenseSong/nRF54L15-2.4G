@@ -1,0 +1,5 @@
+Version target: add PC-side serial statistics capture.
+Changed modules: save_serial_csv.py.
+Runnable result: TX stat and RX stat lines can be saved as structured CSV.
+Known issues: CSV captures statistics only, not full raw sample arrays.
+Evidence path: save_serial_csv.py, applications/rf_link_experiment_records.md.

@@ -1,0 +1,83 @@
+RF Link Development Log
+=======================
+
+2026-04-16 - Dual-core IPC base and RF application split
+What changed:
+- Added applications/rf_link_tx as a dual-core sysbuild application.
+- Added applications/rf_link_tx/flpr_app as the cpuflpr LP child image.
+- Added applications/rf_link_rx as the single-core receiver application.
+- Added common frame structure in rf_link_tx/src/proto.h and rf_link_rx/src/proto.h.
+Why:
+- Keep the final acquisition-side structure close to the planned HP/LP split.
+- Keep RX simple so link issues are easier to isolate.
+Observed:
+- TX/RX build with NCS v3.1.0 and nRF54L15 Connect Kit board targets.
+Result:
+- Basic compile-level application structure is present.
+Next:
+- Bring up IPC, ESB, and serial statistics.
+
+2026-04-16 - LP fake sampling and HP IPC receive path
+What changed:
+- flpr_app/src/adc_sampler.c generates deterministic 16-bit sample frames.
+- flpr_app/src/ipc_tx.c sends complete rf_frame payloads through ipc_service.
+- rf_link_tx/src/ipc_bridge.c receives and validates IPC frames on HP.
+- rf_link_tx/src/tx_queue.c buffers HP-side frames before RF send.
+Why:
+- Use fake data first so ADC driver work is not mixed with RF bring-up.
+- Keep a queue boundary between IPC receive and RF send.
+Observed:
+- HP receives LP frames and can enqueue them.
+Result:
+- LP -> IPC -> HP pipeline established.
+Next:
+- Add ESB PTX/PRX link and RX-side statistics.
+
+2026-04-16 - First ESB private 2.4 GHz link
+What changed:
+- rf_link_tx/src/radio_link.c configures ESB PTX on channel 40.
+- rf_link_rx/src/radio_link.c configures ESB PRX with matching parameters.
+- rf_link_rx/src/rx_reorder.c checks magic, size, sequence, lost frames, and samples.
+- Debug output uses uart_poll_out() instead of printk.
+Why:
+- ESB gives ACK/retransmission and is faster to validate than a bare RADIO state machine.
+- Direct UART was already proven more reliable for this dual-core setup.
+Observed:
+- RX prints frames, samples, bps, lost, dup, bad, seq, first, and last.
+Result:
+- Private 2.4 GHz path is functional.
+Next:
+- Record CSV stats and add latency measurements.
+
+2026-04-19 - MAC latency and CSV capture
+What changed:
+- rf_link_tx/src/radio_link.c measures MAC latency from esb_write_payload() to completion.
+- rf_link_tx/src/main.c prints mac_cnt, mac_last_us, mac_min_us, mac_avg_us, mac_max_us.
+- save_serial_csv.py parses TX stat and RX stat lines into CSV.
+- RX UART output was kept to application statistics only, not raw sample dumps.
+Why:
+- Need latency data without polluting the UART with payload samples.
+- CSV output is needed for later paper/patent experiment records.
+Observed:
+- TX prints MAC latency statistics.
+- RX output remains compact and machine-parseable.
+Result:
+- PC-side CSV capture can record both TX and RX status streams.
+Next:
+- Run sustained 50 kbps and higher-throughput tests.
+
+2026-04-19 - 50 ksps x 16-bit stress setting
+What changed:
+- rf_link_tx/src/proto.h changed TX period from 10 ms to 640 us.
+- rf_link_tx/flpr_app/src/main.c now sleeps with K_USEC(RF_LINK_TX_PERIOD_US).
+Why:
+- 32 samples per frame at 640 us/frame equals 50 ksps.
+Observed:
+- RX effective payload is about 286 to 306 kbps, not 800 kbps.
+- RX lost counter rises quickly.
+- TX q_drop rises quickly while rf_fail stays low.
+- TX MAC latency min/avg is about 1087/1574 us, longer than 640 us.
+Result:
+- Current 1 Mbps ESB + ACK configuration is throughput-limited for 50 ksps.
+Next:
+- Evaluate 2 Mbps/4 Mbps PHY, reduced ACK overhead, larger frames, or streaming no-ACK mode.

@@ -1,0 +1,36 @@
+applications/
+├── rf_link_tx/                      # 发送端，双核
+│   ├── CMakeLists.txt
+│   ├── prj.conf
+│   ├── sysbuild.conf
+│   ├── sysbuild.cmake
+│   ├── src/
+│   │   ├── main.c                   # HP主入口
+│   │   ├── radio_link.c             # ESB发送
+│   │   ├── ipc_bridge.c             # IPC收数/通知
+│   │   ├── tx_queue.c               # 发送队列
+│   │   ├── debug_uart.c             # 直驱UART调试
+│   │   └── proto.h                  # 帧格式定义
+│   ├── boards/
+│   │   └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
+│   └── flpr_app/
+│       ├── CMakeLists.txt
+│       ├── prj.conf
+│       ├── src/
+│       │   ├── main.c               # LP主入口
+│       │   ├── adc_sampler.c        # 先假数据，后替换ADC
+│       │   ├── sample_buffer.c      # LP环形缓冲
+│       │   └── ipc_tx.c             # 向HP通知/送块
+│       └── boards/
+│           └── nrf54l15_connectkit_nrf54l15_cpuflpr.overlay
+│
+└── rf_link_rx/                      # 接收端，单核
+    ├── CMakeLists.txt
+    ├── prj.conf
+    ├── src/
+    │   ├── main.c
+    │   ├── radio_link.c             # ESB接收
+    │   ├── rx_reorder.c             # seq检查/重组
+    │   └── debug_uart.c             # 向PC输出统计
+    └── boards/
+        └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
