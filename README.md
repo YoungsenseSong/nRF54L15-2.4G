@@ -1,123 +1,219 @@
-# nRF54L15 Connect Kit
+# nRF54L15 Private 2.4G Wireless Data Link
 
-> Rapid Prototyping Kit for Your Next-Gen IoT Devices powered by the nRF54L15 Multiprotocol SoC
+This repository is a private 2.4 GHz wireless data-link project based on the
+nRF54L15 Connect Kit. The current implementation focuses on a point-to-point
+16-bit sample transport path using Nordic ESB, with a dual-core transmitter and
+a single-core receiver.
 
-[![](https://img.shields.io/badge/In%20Stock-3ed660)][nrf54l15-connectkit]
-[![Current Version](https://img.shields.io/github/tag/makerdiary/nrf54l15-connectkit.svg)](https://github.com/makerdiary/nrf54l15-connectkit/tags)
-[![Documentation](https://github.com/makerdiary/nrf54l15-connectkit/actions/workflows/documentation.yml/badge.svg?branch=main)](https://wiki.makerdiary.com/nrf54l15-connectkit)
-[![Twister Apps & Samples](https://github.com/makerdiary/nrf54l15-connectkit/actions/workflows/twister-apps-samples.yml/badge.svg?branch=main)](https://wiki.makerdiary.com/nrf54l15-connectkit/guides/ncs/)
-[![PRs Welcome](https://img.shields.io/badge/Contributing-appreciated-brightgreen?color=informational)](https://wiki.makerdiary.com/nrf54l15-connectkit/contributing/)
+The original Makerdiary nRF54L15 Connect Kit repository is used as the hardware
+and board-support base. This repository entrypoint documents the RF link
+application, experiment records, and current performance findings.
 
-## Introduction
+## Project Scope
 
-[nRF54L15 Connect Kit][nrf54l15-connectkit] is a rapid prototyping kit built around the [nRF54L15][nrf54l15] multiprotocol SoC featuring a 128 MHz Arm Cortex®-M33 processor and a 128 MHz RISC-V coprocessor with 1.5 MB NVM and 256 KB RAM. It supports Bluetooth Low Energy 6.0, Thread®, Matter, Zigbee®, 4 Mbps proprietary 2.4 GHz mode, NFC and enhanced security.
+- Build a private 2.4 GHz wireless link on nRF54L15.
+- Use `cpuapp` as the high-performance TX control core.
+- Use `cpuflpr` as the lightweight TX sampling/data-generation core.
+- Exchange TX-side data between LP and HP cores through `ipc_service` + `icmsg`.
+- Send framed 16-bit sample data over ESB.
+- Receive data on a simple single-core RX application.
+- Export UART statistics and CSV logs for later paper/patent evidence.
 
-The design integrates an [nRF52820][nrf52820]-based Interface MCU that enables onboard debugging and programming, eliminating the need for external tools. The Interface MCU also includes a USB-UART bridge for log, trace and terminal emulation, and an Interface Shell bundled with helpful commands to access the board-specific functionality.
+## Repository Entry Points
 
-The board contains a [TPS63901][tps63901] buck-boost converter with 75-nA quiescent current and 1.8V/3.3V configurable power supply for I/Os, supporting various options for easily powering the unit from USB-C, external supplies or batteries.
+| Path | Purpose |
+| --- | --- |
+| `applications/rf_link_tx/` | Dual-core transmitter application. |
+| `applications/rf_link_tx/flpr_app/` | LP core child image for fake sampling and IPC TX. |
+| `applications/rf_link_rx/` | Single-core receiver application. |
+| `applications/rf_link_README.md` | Application-level README with build, flash, and UART use. |
+| `applications/rf_link_DESIGN.md` | Architecture and design notes. |
+| `applications/rf_link_development_log.txt` | Short devlog for each development step. |
+| `applications/rf_link_experiment_records.md` | Experiment notes and captured UART snippets. |
+| `applications/rf_link_experiment_logs/` | Per-experiment raw excerpts and optimization table. |
+| `applications/rf_link_parameter_matrix.csv` | Version/parameter comparison table. |
+| `applications/rf_link_tag_notes/` | Five-line notes for each project tag. |
+| `save_serial_csv.py` | PC-side UART statistics to CSV capture tool. |
 
-It also has USB-C, LEDs, Buttons, U.FL receptacles for U.FL cabled 2.4 GHz Antenna and 13.56 MHz NFC Antenna, Arm Serial Wire Debug (SWD) port and dual-row 40 pins with loose or pre-soldered headers available.
+## Current Architecture
 
-[nRF Connect SDK][ncs] is supported, including the [Zephyr RTOS][zephyr]. Developers can explore the full potential of the nRF54L15 using the extensive range of software samples, modules, and libraries available within the nRF Connect SDK. It is open source, and can be leveraged and modified to suit your specific needs.
+```text
+TX LP core cpuflpr
+  fake ADC/sample generator
+  frame buffer
+  IPC sender
 
-[![](./docs/assets/images/nrf54l15-connectkit-prod-hero.png)][nrf54l15-connectkit]
+        |
+        v
 
-## Key Features
+TX HP core cpuapp
+  IPC receiver
+  TX queue
+  ESB PTX radio sender
+  MAC latency statistics
+  UART status output
 
-* Nordic Semiconductor nRF54L15 SoC
+        |
+        v
 
-	- 128 MHz Arm Cortex®-M33 processor and 128 MHz RISC-V coprocessor
-	- 1.5 MB NVM and 256 KB RAM
-	- Multiprotocol 2.4 GHz radio supporting Bluetooth Low Energy, 802.15.4-2020, and 2.4 GHz
-	  proprietary modes (up to 4 Mbps)
-	- Advanced security features with physical protection
-	- Global RTC (GRTC) available in System OFF mode
-	- 5x SPI/UART/I2C, 3x PWM, 2x QDEC, I2S, PDM, 14-bit ADC, GPIOs
-	- Integrated NFC-A Tag
+RX cpuapp
+  ESB PRX radio receiver
+  frame validation
+  sequence/loss statistics
+  UART status output
+```
 
-* On-board Interface MCU
+## Current Frame Format
 
-	- Built using nRF52820 with 64 MHz Arm Cortex-M4, 256 KB Flash & 32 KB RAM
-	- Built-in CMSIS-DAP support for debugging and programming
-	- USB-UART bridge for log, trace and terminal emulation
-	- Interface Shell with helpful commands to access the board-specific functionality
-	- Self-upgradable UF2 Bootloader featuring drag-and-drop programming for Interface MCU firmware update
-	- Open source and more features will be released gradually over time
+The current RF payload is a fixed 76-byte application frame:
 
-* TPS63901 buck-boost converter with 75-nA quiescent current and 1.8V/3.3V configurable power supply for I/Os
-* Shipped with U.FL cabled 2.4 GHz Antenna and 13.56 MHz NFC Antenna
-* Up to 31 multi-function GPIOs (8 can be configured as ADC inputs) through edge pins
-* Arm Serial Wire Debug (SWD) port through edge pins
-* USB-C, LEDs, Buttons and U.FL receptacles
-* Dual-row 40 pins in 55.88mm x 20.32mm (2.2" x 0.8") DIP/SMT form factor
-* Available in Loose or Pre-soldered headers options
-* Built on open source, supporting nRF Connect SDK and Zephyr RTOS, etc
+```c
+struct rf_frame {
+    uint16_t magic;          /* 0xA55A */
+    uint16_t seq;            /* wraps at 65535 */
+    uint16_t sample_count;   /* 32 */
+    uint16_t flags;
+    uint32_t timestamp_ms;
+    int16_t samples[32];
+} __packed;
+```
 
-## Hardware Diagram
+Raw sample arrays are intentionally not printed on UART. UART output is limited
+to application statistics and latency fields so that the serial port does not
+become the measurement bottleneck.
 
-The following figure illustrates the nRF54L15 Connect Kit hardware diagram. The design is available with loose or pre-soldered pin headers. For more details, refer to the [Hardware description][hw-desc] section.
+## Current Radio Parameters
 
-[![](./docs/assets/images/nrf54l15-connectkit-reva-pinout-front.png)][pinout-pdf]
+| Item | Current value |
+| --- | --- |
+| Radio backend | Nordic ESB |
+| TX mode | PTX |
+| RX mode | PRX |
+| PHY | 1 Mbps |
+| Channel | 40 |
+| ACK | Enabled |
+| Application frame | 76 bytes |
+| Samples per frame | 32 x 16-bit |
+| Current stress target | 50 ksps x 16-bit = 800 kbps payload |
 
-[![](./docs/assets/images/nrf54l15-connectkit-reva-pinout-back.png)][pinout-pdf]
+## Current Performance Status
 
-## Mechanical Dimensions
+Two key operating points have been recorded:
 
-The nRF54L15 Connect Kit is a 4-layer chem. Gold, 55.88mm x 20.32mm (2.2" x 0.8") 1mm thick PCB with a USB Type-C port, LEDs, Buttons, U.FL receptacles and 40x castellated/through-hole pins.
+| Version | Target | Result |
+| --- | --- | --- |
+| `v0.3-rf-link-docs-devlog` baseline notes | 16-bit 50 kbps-class link | 32 samples every 10 ms, about 51.2 kbps payload target. |
+| `v0.4-50ksps-load-test` | 50 ksps x 16-bit, 800 kbps payload | RX observed about 286 to 306 kbps with high sequence loss and TX queue drops. |
 
-[![](./docs/assets/images/nrf54l15-connectkit-dimensions_reva.png)][dxf-files]
+The latest 50 ksps test shows the current `1 Mbps ESB + ACK + 76-byte frame`
+configuration is throughput-limited. The evidence is recorded in:
 
-## Documentation
+- `applications/rf_link_experiment_logs/20260419_50ksps_uart_excerpt.txt`
+- `applications/rf_link_experiment_logs/optimization_attempts.md`
+- `applications/rf_link_experiment_records.md`
 
-We offer a comprehensive set of documentation, including getting started guides, developer guides, and code examples. These resources are designed to reduce development effort and help you achieve faster time-to-market.
+## Build
 
-* [nRF54L15 Connect Kit Documentation][wiki]
-* [nRF54L15 Connect Kit Product Brief][product-brief]
-* [nRF54L15 Connect Kit Quick Start Guide][quick-start]
-* [Develop with nRF Connect SDK][ncs-guide]
-* [nRF54L15 Connect Kit Programming Guide][programming]
-* [nRF54L15 Connect Kit Pinout Diagram Rev.A][pinout-pdf]
-* [nRF54L15 Connect Kit Hardware Description][hw-desc]
-* [nRF54L15 Connect Kit Schematic Rev.A][schematic]
-* [nRF54L15 Connect Kit Board DXF Files Rev.A][dxf-files]
-* [nRF54L15 Connect Kit 3D Model Rev.A][3d-model]
+From the NCS project root:
 
-## Where to Buy
+```powershell
+cd D:\nRF54L15\NCS-Project
+.\.venv\Scripts\Activate.ps1
+cd nrf54l15-connectkit
+```
 
-nRF54L15 Connect Kit is available on the following channels (click to go directly to the product):
+Build TX dual-core application:
 
-<a href="https://makerdiary.com/products/nrf54l15-connectkit"><img alt="makerdiary store" display="inline" src="./docs/assets/images/makerdiary-store-github.png" width="256"></a>
-<a href="https://item.taobao.com/item.htm?ft=t&id=970651099950"><img alt="Taobao" display="inline" src="./docs/assets/images/taobao-store-github.png" width="256"></a>
-<a href="https://www.tindie.com/products/makerdiary/nrf54l15-connect-kit"><img alt="Tindie" display="inline" src="./docs/assets/images/tindie-store-github.png" width="256"></a>
+```powershell
+west build -p always --sysbuild -d build_rf_link_tx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
+```
 
-## Community Support
+Build RX single-core application:
 
-Community support is provided via [GitHub Discussions][discussions]. We would love to have more developers contribute to this project! If you're passionate about making this project better, see our [Contributing Guidelines][contributing] for more information.
+```powershell
+west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
+```
+
+## Flash
+
+Flash TX HP core:
+
+```powershell
+west flash -d build_rf_link_tx --domain rf_link_tx
+```
+
+Flash TX LP core:
+
+```powershell
+pyocd load -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
+```
+
+Flash RX:
+
+```powershell
+west flash -d build_rf_link_rx
+```
+
+## UART Statistics
+
+TX prints:
+
+```text
+TX stat sent=... ipc_rx=... queued=... q_drop=... rf_ok=... rf_fail=... rf_timeout=... attempts=... mac_cnt=... mac_last_us=... mac_min_us=... mac_avg_us=... mac_max_us=...
+```
+
+RX prints:
+
+```text
+RX stat frames=... samples=... bps=... lost=... dup=... bad=... seq=... first=... last=...
+```
+
+Use the CSV capture tool:
+
+```powershell
+python .\save_serial_csv.py --list-ports
+python .\save_serial_csv.py --port COM7 --output rx_stats.csv
+python .\save_serial_csv.py --port COM8 --output tx_stats.csv
+```
+
+## Milestone Tags
+
+| Tag | Meaning |
+| --- | --- |
+| `v0.1-rf-link-apps` | Runnable TX/RX RF link applications. |
+| `v0.2-rf-link-csv-capture` | UART status CSV capture tool. |
+| `v0.3-rf-link-docs-devlog` | README, design notes, devlog, experiment records. |
+| `v0.4-50ksps-load-test` | 50 ksps x 16-bit stress test evidence. |
+
+Each tag has a short note under `applications/rf_link_tag_notes/`.
+
+## Next Optimization Experiments
+
+The next work should be recorded as continuous experiments:
+
+1. Try 2 Mbps / 4 Mbps PHY.
+2. Reduce ACK overhead or evaluate no-ACK streaming.
+3. Increase samples per frame if payload limits allow it.
+4. Reduce UART print frequency during high-rate tests.
+5. Add GPIO timing probes for hardware latency measurement.
+6. Replace fake samples with ADC DMA after RF throughput has enough margin.
+
+The tracking table is:
+
+```text
+applications/rf_link_experiment_logs/optimization_attempts.md
+```
+
+## Hardware Base
+
+This project is based on Makerdiary's nRF54L15 Connect Kit board support and
+development environment. For board hardware documentation, see:
+
+- https://github.com/makerdiary/nrf54l15-connectkit
+- https://wiki.makerdiary.com/nrf54l15-connectkit/
 
 ## License
 
-This project is licensed under the Apache License 2.0 unless otherwise stated. For the full license text, please refer to the [LICENSE](./LICENSE) file.
-
-The nRF Connect SDK and its components are licensed under the 5-Clause Nordic License. See [LICENSE-NORDIC](./LICENSE-NORDIC) for further details.
-
-This project may include some imported or reused components that are licensed under different terms. Please refer to the license files within those components for details.
-
-
-[nrf54l15-connectkit]: https://makerdiary.com/products/nrf54l15-connectkit
-[nrf54l15]: https://www.nordicsemi.com/Products/nRF54L15
-[nrf52820]: https://www.nordicsemi.com/Products/nRF52820
-[tps63901]: https://www.ti.com/product/TPS63901
-[ncs]: https://github.com/nrfconnect/sdk-nrf
-[zephyr]: https://github.com/zephyrproject-rtos/zephyr
-[hw-desc]: https://wiki.makerdiary.com/nrf54l15-connectkit/hardware/
-[pinout-pdf]: https://wiki.makerdiary.com/nrf54l15-connectkit/assets/attachments/nrf54l15-connect-kit-pinout-diagram_reva.pdf
-[wiki]: https://wiki.makerdiary.com/nrf54l15-connectkit/
-[product-brief]: https://wiki.makerdiary.com/nrf54l15-connectkit/introduction/
-[quick-start]: https://wiki.makerdiary.com/nrf54l15-connectkit/getting-started/
-[ncs-guide]: https://wiki.makerdiary.com/nrf54l15-connectkit/guides/ncs/
-[programming]: https://wiki.makerdiary.com/nrf54l15-connectkit/guides/programming/
-[schematic]: https://wiki.makerdiary.com/nrf54l15-connectkit/assets/attachments/nrf54l15-connect-kit-schematic_reva.pdf
-[dxf-files]: https://wiki.makerdiary.com/nrf54l15-connectkit/assets/attachments/nrf54l15-connect-kit-board-dxf_reva.zip
-[3d-model]: https://wiki.makerdiary.com/nrf54l15-connectkit/assets/attachments/nrf54l15-connect-kit-3d-model_reva.step
-[discussions]: https://github.com/makerdiary/nrf54l15-connectkit/discussions
-[contributing]: https://wiki.makerdiary.com/nrf54l15-connectkit/contributing/
+This repository inherits the original project license files where applicable.
+New project documentation and application code should be reviewed together with
+the existing `LICENSE` and `LICENSE-NORDIC` files.
