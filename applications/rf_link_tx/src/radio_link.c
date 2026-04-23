@@ -27,6 +27,14 @@
 BUILD_ASSERT(RF_LINK_FRAME_WIRE_SIZE <= CONFIG_ESB_MAX_PAYLOAD_LENGTH,
 	     "CONFIG_ESB_MAX_PAYLOAD_LENGTH is too small for rf_frame");
 
+#if defined(RADIO_MODE_MODE_Nrf_4Mbit_0BT6)
+#define RF_LINK_ESB_BITRATE ESB_BITRATE_4MBPS
+#define RF_LINK_PHY_LABEL   "4M"
+#else
+#define RF_LINK_ESB_BITRATE ESB_BITRATE_2MBPS
+#define RF_LINK_PHY_LABEL   "2M"
+#endif
+
 static K_SEM_DEFINE(tx_done_sem, 0, 1);
 
 static atomic_t tx_ok;
@@ -174,13 +182,13 @@ int radio_link_init(void)
 
 	config.protocol = ESB_PROTOCOL_ESB_DPL;
 	config.mode = ESB_MODE_PTX;
-	config.bitrate = ESB_BITRATE_1MBPS;
+	config.bitrate = RF_LINK_ESB_BITRATE;
 	config.crc = ESB_CRC_16BIT;
 	config.event_handler = radio_event_handler;
 	config.retransmit_delay = 600;
-	config.retransmit_count = 8;
+	config.retransmit_count = 0;
 	config.payload_length = RF_LINK_FRAME_WIRE_SIZE;
-	config.selective_auto_ack = false;
+	config.selective_auto_ack = true;
 	config.tx_mode = ESB_TXMODE_AUTO;
 
 	ret = esb_init(&config);
@@ -228,18 +236,12 @@ int radio_link_send_frame(const struct rf_frame *frame, k_timeout_t timeout)
 	}
 
 	payload.pipe = 0;
-	payload.noack = false;
+	payload.noack = RF_LINK_NOACK_STREAM ? true : false;
 	payload.length = RF_LINK_FRAME_WIRE_SIZE;
 	memcpy(payload.data, frame, sizeof(*frame));
 
 	k_sem_reset(&tx_done_sem);
 	last_tx_result = -EINPROGRESS;
-
-	ret = esb_flush_tx();
-	if (ret != 0) {
-		atomic_inc(&tx_errors);
-		return ret;
-	}
 
 	start_cycles = k_cycle_get_32();
 
@@ -284,4 +286,9 @@ void radio_link_stats_get(struct radio_link_stats *stats)
 				    (uint32_t)(latency_sum_us / latency_count);
 	stats->mac_latency_max_us = latency_max_us;
 	k_spin_unlock(&latency_lock, key);
+}
+
+const char *radio_link_phy_label(void)
+{
+	return RF_LINK_PHY_LABEL;
 }

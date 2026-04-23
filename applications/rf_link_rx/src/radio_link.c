@@ -29,6 +29,14 @@
 BUILD_ASSERT(RF_LINK_FRAME_WIRE_SIZE <= CONFIG_ESB_MAX_PAYLOAD_LENGTH,
 	     "CONFIG_ESB_MAX_PAYLOAD_LENGTH is too small for rf_frame");
 
+#if defined(RADIO_MODE_MODE_Nrf_4Mbit_0BT6)
+#define RF_LINK_ESB_BITRATE ESB_BITRATE_4MBPS
+#define RF_LINK_PHY_LABEL   "4M"
+#else
+#define RF_LINK_ESB_BITRATE ESB_BITRATE_2MBPS
+#define RF_LINK_PHY_LABEL   "2M"
+#endif
+
 static atomic_t rx_events;
 static atomic_t rx_frames;
 static atomic_t rx_read_errors;
@@ -149,11 +157,11 @@ int radio_link_init(void)
 
 	config.protocol = ESB_PROTOCOL_ESB_DPL;
 	config.mode = ESB_MODE_PRX;
-	config.bitrate = ESB_BITRATE_1MBPS;
+	config.bitrate = RF_LINK_ESB_BITRATE;
 	config.crc = ESB_CRC_16BIT;
 	config.event_handler = radio_event_handler;
 	config.payload_length = RF_LINK_FRAME_WIRE_SIZE;
-	config.selective_auto_ack = false;
+	config.selective_auto_ack = true;
 
 	ret = esb_init(&config);
 	if (ret != 0) {
@@ -202,4 +210,9 @@ void radio_link_stats_get(struct radio_link_stats *stats)
 	stats->rx_events = (uint32_t)atomic_get(&rx_events);
 	stats->rx_frames = (uint32_t)atomic_get(&rx_frames);
 	stats->rx_read_errors = (uint32_t)atomic_get(&rx_read_errors);
+}
+
+const char *radio_link_phy_label(void)
+{
+	return RF_LINK_PHY_LABEL;
 }

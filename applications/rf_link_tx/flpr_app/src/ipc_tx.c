@@ -85,7 +85,7 @@ int ipc_tx_send_frame(const struct rf_frame *frame, k_timeout_t timeout)
 		}
 
 		atomic_inc(&busy);
-		k_sleep(K_MSEC(1));
+		k_sleep(K_USEC(50));
 	} while (K_TIMEOUT_EQ(timeout, K_FOREVER) || !sys_timepoint_expired(end));
 
 	atomic_inc(&failed);

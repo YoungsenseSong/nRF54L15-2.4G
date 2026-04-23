@@ -10,8 +10,14 @@ static void print_boot_line(void)
 {
 	debug_uart_puts("\r\nrf_link_rx started");
 	debug_uart_crlf();
-	debug_uart_puts("mode=ESB_PRX,phy=1M,channel=");
+	debug_uart_puts("mode=ESB_PRX,phy=");
+	debug_uart_puts(radio_link_phy_label());
+	debug_uart_puts(",ack=");
+	debug_uart_puts(RF_LINK_NOACK_STREAM ? "noack" : "ack");
+	debug_uart_puts(",channel=");
 	debug_uart_u32(RF_LINK_CHANNEL);
+	debug_uart_puts(",samples_per_frame=");
+	debug_uart_u32(RF_LINK_FRAME_SAMPLE_COUNT);
 	debug_uart_crlf();
 }
 
@@ -76,7 +82,7 @@ int main(void)
 
 	last_ms = k_uptime_get();
 	while (1) {
-		k_sleep(K_SECONDS(1));
+		k_sleep(K_MSEC(RF_LINK_STATUS_PERIOD_MS));
 		print_stats(last_bytes, last_ms);
 		rx_reorder_stats_get(&rx_stats);
 		last_bytes = rx_stats.bytes;

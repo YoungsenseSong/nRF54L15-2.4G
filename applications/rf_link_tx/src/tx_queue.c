@@ -4,7 +4,7 @@
 #include <string.h>
 #include <zephyr/sys/atomic.h>
 
-#define TX_QUEUE_DEPTH 16
+#define TX_QUEUE_DEPTH 64
 
 K_MSGQ_DEFINE(tx_frame_msgq, sizeof(struct rf_frame), TX_QUEUE_DEPTH, 4);
 

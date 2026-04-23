@@ -12,10 +12,16 @@ static void print_boot_line(void)
 {
 	debug_uart_puts("\r\nrf_link_tx HP started");
 	debug_uart_crlf();
-	debug_uart_puts("mode=ESB_PTX,phy=1M,channel=");
+	debug_uart_puts("mode=ESB_PTX,phy=");
+	debug_uart_puts(radio_link_phy_label());
+	debug_uart_puts(",ack=");
+	debug_uart_puts(RF_LINK_NOACK_STREAM ? "noack" : "ack");
+	debug_uart_puts(",channel=");
 	debug_uart_u32(RF_LINK_CHANNEL);
 	debug_uart_puts(",samples_per_frame=");
 	debug_uart_u32(RF_LINK_FRAME_SAMPLE_COUNT);
+	debug_uart_puts(",period_us=");
+	debug_uart_u32(RF_LINK_TX_PERIOD_US);
 	debug_uart_crlf();
 }
 
@@ -58,10 +64,21 @@ static void print_status(uint32_t sent_frames)
 	debug_uart_crlf();
 }
 
+static void maybe_print_status(uint32_t sent_frames, uint32_t *last_status_ms)
+{
+	uint32_t now_ms = k_uptime_get_32();
+
+	if ((uint32_t)(now_ms - *last_status_ms) >= RF_LINK_STATUS_PERIOD_MS) {
+		print_status(sent_frames);
+		*last_status_ms = now_ms;
+	}
+}
+
 int main(void)
 {
 	struct rf_frame frame;
 	uint32_t sent_frames = 0;
+	uint32_t last_status_ms;
 	int ret;
 
 	(void)debug_uart_init();
@@ -99,24 +116,23 @@ int main(void)
 
 	debug_uart_puts("LP IPC endpoint bound");
 	debug_uart_crlf();
+	last_status_ms = k_uptime_get_32();
 
 	while (1) {
 		ret = tx_queue_get(&frame, K_SECONDS(1));
 		if (ret == -EAGAIN) {
-			print_status(sent_frames);
+			maybe_print_status(sent_frames, &last_status_ms);
 			continue;
 		}
 		if (ret != 0) {
 			continue;
 		}
 
-		ret = radio_link_send_frame(&frame, K_MSEC(20));
+		ret = radio_link_send_frame(&frame, K_MSEC(5));
 		if (ret == 0) {
 			sent_frames++;
 		}
 
-		if ((sent_frames % 100u) == 0u) {
-			print_status(sent_frames);
-		}
+		maybe_print_status(sent_frames, &last_status_ms);
 	}
 }

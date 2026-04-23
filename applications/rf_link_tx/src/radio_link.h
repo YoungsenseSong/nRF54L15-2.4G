@@ -22,5 +22,6 @@ struct radio_link_stats {
 int radio_link_init(void);
 int radio_link_send_frame(const struct rf_frame *frame, k_timeout_t timeout);
 void radio_link_stats_get(struct radio_link_stats *stats);
+const char *radio_link_phy_label(void);
 
 #endif /* RF_LINK_RADIO_LINK_H_ */

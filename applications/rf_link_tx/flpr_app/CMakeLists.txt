@@ -14,7 +14,6 @@ target_sources(app PRIVATE
   src/adc_sampler.c
   src/ipc_tx.c
   src/main.c
-  src/sample_buffer.c
 )
 
 target_include_directories(app PRIVATE

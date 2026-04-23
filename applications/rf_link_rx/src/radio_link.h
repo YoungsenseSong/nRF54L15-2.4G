@@ -11,5 +11,6 @@ struct radio_link_stats {
 
 int radio_link_init(void);
 void radio_link_stats_get(struct radio_link_stats *stats);
+const char *radio_link_phy_label(void);
 
 #endif /* RF_LINK_RADIO_LINK_H_ */
