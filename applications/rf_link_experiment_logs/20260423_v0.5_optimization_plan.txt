@@ -1,0 +1,48 @@
+Experiment: EXP-001 / v0.5-rf-throughput-optimization
+Date: 2026-04-23
+
+Goal:
+- Push the private 2.4 GHz link toward 50 ksps x 16-bit = 800 kbps payload.
+- Reduce the bottleneck observed in v0.4, where 1 Mbps ESB + ACK could not
+  drain 32-sample frames every 640 us.
+
+Firmware parameters:
+- PHY: ESB 4 Mbps on nRF54L15 when available, otherwise 2 Mbps fallback.
+- ACK mode: no-ACK streaming payloads.
+- Channel: 40.
+- Frame size: 204 bytes.
+- Samples per frame: 96 x 16-bit.
+- TX period: 1920 us.
+- Effective target: 96 samples / 1.92 ms = 50 ksps, 800 kbps payload.
+- HP TX queue depth: 64 frames.
+- ESB TX/RX FIFO size: 16.
+- UART status period: 1000 ms.
+
+Code changes to verify:
+- TX and RX proto.h agree on 96 samples and 204-byte wire frame.
+- TX and RX radio_link.c agree on PHY, channel, CRC, and no-ACK behavior.
+- TX FLPR main sends generated frames directly to IPC every 1920 us.
+- TX HP main sends frames with a short 5 ms MAC timeout and time-based status.
+- RX main reports one stats line per second.
+
+Measurement procedure:
+- Flash TX with build_rf_link_tx and RX with build_rf_link_rx.
+- Open RX UART and TX UART at 115200 baud.
+- Capture both streams with save_serial_csv.py for at least 60 seconds.
+- Record board distance, antenna orientation, and room/environment.
+
+Metrics to record:
+- RX bps average and range.
+- RX lost delta per second.
+- RX bad and dup deltas.
+- TX q_drop delta per second.
+- TX rf_fail and rf_timeout deltas.
+- TX mac_min_us, mac_avg_us, mac_max_us.
+
+Pass criterion:
+- RX bps should approach 800000 bit/s with much lower lost and q_drop than
+  EXP-000.
+
+Current result:
+- Build verified locally.
+- Hardware UART/CSV measurement is pending.

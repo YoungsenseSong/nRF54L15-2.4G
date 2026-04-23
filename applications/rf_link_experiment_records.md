@@ -57,6 +57,29 @@ Interpretation:
 - Low `rf_fail` means link quality is not the primary blocker in this sample.
 - MAC latency is longer than the requested 640 us frame period.
 
+## Experiment 3 - v0.5 Throughput Optimization Build
+
+- Date: 2026-04-23
+- Firmware: `v0.5-rf-throughput-optimization`
+- Target: 50 ksps x 16 bit = 800 kbps effective payload.
+- Parameters: ESB 4 Mbps on nRF54L15 if supported, no-ACK streaming payloads,
+  96 x 16-bit samples per frame, 1920 us frame period, 204-byte frame.
+- Queue/runtime changes: HP TX queue depth 64, ESB FIFO size 16, UART status
+  period 1000 ms, FLPR direct frame-to-IPC send path.
+- Build result: TX dual-core sysbuild and RX single-core build both pass.
+- Hardware result: pending UART/CSV capture.
+
+Planned capture commands:
+
+```powershell
+python .\save_serial_csv.py --port COM7 --output experiments\20260423_v0.5_rx.csv
+python .\save_serial_csv.py --port COM8 --output experiments\20260423_v0.5_tx.csv
+```
+
+Record the actual distance, orientation, RX average `bps`, RX `lost` delta, TX
+`q_drop` delta, and TX MAC latency fields in
+`rf_link_experiment_logs/optimization_attempts.md` after the run.
+
 ## CSV Output Locations
 
 Recommended naming:

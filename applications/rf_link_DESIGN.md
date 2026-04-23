@@ -15,14 +15,16 @@
   - Initializes debug UART, TX queue, ESB radio, and IPC bridge.
   - Pulls validated frames from `tx_queue`.
   - Sends each frame through `radio_link_send_frame()`.
-  - Prints TX status every 100 successful RF sends or once per idle second.
+  - Prints TX status once per configured status period.
 - `proto.h`
-  - Defines the fixed 76-byte `rf_frame`.
-  - Defines the common channel, magic value, sample count, and TX period.
+  - Defines the fixed 204-byte `rf_frame`.
+  - Defines the common channel, magic value, sample count, TX period, status
+    period, and no-ACK streaming flag.
 - `radio_link.c`
   - Starts the radio clock domain.
   - Configures ESB in PTX mode.
-  - Uses 1 Mbps PHY, channel 40, 16-bit CRC, ACK enabled.
+  - Uses 4 Mbps PHY on nRF54L15 when available, with a 2 Mbps fallback.
+  - Uses channel 40, 16-bit CRC, selective ACK support, and no-ACK payloads.
   - Measures MAC send latency from `esb_write_payload()` to the ESB completion
     event or timeout.
   - Tracks min/avg/max/last latency in microseconds.
@@ -33,6 +35,7 @@
 - `tx_queue.c`
   - Provides a fixed-depth message queue for RF frames.
   - Drops the oldest frame when the queue is full so the link favors newer data.
+  - Uses a larger HP queue for the high-rate 50 ksps test path.
 - `debug_uart.c`
   - Uses `uart_poll_out()` directly on `uart30`.
   - Avoids relying on Zephyr console/printk in dual-core mode.
@@ -40,16 +43,17 @@
 ### TX LP core: `applications/rf_link_tx/flpr_app/src`
 
 - `main.c`
-  - Initializes fake sampler, sample buffer, and IPC TX endpoint.
-  - Generates one frame per configured period.
-  - Sends buffered frames to HP over IPC.
+  - Initializes fake sampler and IPC TX endpoint.
+  - Generates one 96-sample frame per 1920 us period.
+  - Sends each generated frame directly to HP over IPC to avoid an extra LP
+    software queue in the high-rate path.
 - `adc_sampler.c`
   - Generates deterministic fake 12-bit ramp samples.
   - Fills `rf_frame` with magic, sequence, count, flags, timestamp, and samples.
   - Intended replacement point for real ADC acquisition.
 - `sample_buffer.c`
-  - Provides a small LP-side frame queue.
-  - Drops oldest data under pressure.
+  - Kept as a local helper for future producer/consumer experiments.
+  - Not built into the current high-rate FLPR image.
 - `ipc_tx.c`
   - Opens `ipc0`, registers endpoint, waits for HP bind.
   - Sends full `rf_frame` payloads to HP.
@@ -61,7 +65,8 @@
   - Prints one status line per second.
 - `radio_link.c`
   - Starts radio clock.
-  - Configures ESB PRX with matching address/channel/PHY.
+  - Configures ESB PRX with matching address/channel/PHY and no-ACK payload
+    behavior.
   - Reads every ESB payload and passes it to `rx_reorder_process_frame()`.
 - `rx_reorder.c`
   - Validates frame size, magic, and sample count.
@@ -72,20 +77,20 @@
 
 ## Current Performance Finding
 
-The 50 ksps target is configured by setting:
+The current 50 ksps optimization build is configured by setting:
 
 ```text
-32 samples/frame, one frame every 640 us
+96 samples/frame, one frame every 1920 us
 ```
 
 This equals:
 
 ```text
-32 / 0.00064 = 50000 samples/s
+96 / 0.00192 = 50000 samples/s
 50000 * 16 = 800000 bit/s
 ```
 
-Observed logs with ESB 1 Mbps + ACK show:
+Measured `v0.4` logs with ESB 1 Mbps + ACK showed:
 
 - RX effective payload rate: about 286 to 306 kbps.
 - RX sequence loss increases rapidly.
@@ -95,13 +100,26 @@ Observed logs with ESB 1 Mbps + ACK show:
 - TX MAC latency min is about 1087 us and average about 1574 us, which is
   longer than the requested 640 us frame period.
 
+The `v0.5` build changes the bottleneck assumptions:
+
+- PHY is raised to 4 Mbps on nRF54L15.
+- Payload data uses ESB no-ACK to remove ACK turnaround from the streaming path.
+- Frame size is raised to 204 bytes so the packet rate drops from 1562.5 pps to
+  about 520.8 pps for the same 50 ksps payload.
+- HP TX queue is raised from 16 to 64 frames.
+- UART status printing is time-based at 1000 ms, not packet-count based.
+- FLPR sends generated frames directly over IPC with a 200 us IPC send timeout.
+
+The expected full-rate RX payload is still 800 kbps. Whether `lost` and `q_drop`
+remain acceptable must be measured on hardware and recorded as EXP-001.
+
 ## Next Engineering Options
 
-To reach 50 ksps reliably, the next changes should be evaluated separately:
+To reach 50 ksps reliably, the next changes should be evaluated after the
+`v0.5` hardware run:
 
-1. Move ESB PHY from 1 Mbps to 2 Mbps or 4 Mbps if supported on this target.
-2. Reduce ACK frequency or use a no-ACK streaming mode for payload data.
-3. Increase samples per RF frame if ESB payload limits allow it.
-4. Lower UART status print rate under high-rate tests.
-5. Add GPIO timing probes for hardware latency measurement.
-6. Replace fake sampler with ADC DMA only after the RF path has enough margin.
+1. Compare 4 Mbps no-ACK with 2 Mbps no-ACK for range and loss.
+2. Add a low-rate control/heartbeat frame if batch ACK is needed.
+3. Tune frame sample count if 204-byte payloads prove too fragile over distance.
+4. Add GPIO timing probes for hardware latency measurement.
+5. Replace fake sampler with ADC DMA only after the RF path has enough margin.

@@ -1,0 +1,5 @@
+Version target: raise private 2.4G link headroom for 50 ksps x 16 bit, 800 kbps payload.
+Changed modules: TX/RX proto, TX/RX radio_link, TX/FLPR send path, queue sizing, UART status period, docs/logs.
+Runnable result: TX dual-core sysbuild and RX single-core build pass locally.
+Known issues: hardware bps/lost/q_drop/latency measurement is still pending.
+Evidence path: applications/rf_link_experiment_logs/20260423_v0.5_optimization_plan.txt and optimization_attempts.md.

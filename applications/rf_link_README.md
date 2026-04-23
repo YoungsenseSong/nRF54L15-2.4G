@@ -27,34 +27,36 @@ ESB PRX -> frame validation -> sequence/loss statistics -> UART status output
 
 ## Frame Format
 
-The first-stage radio frame is fixed at 76 bytes:
+The first-stage radio frame is fixed at 204 bytes:
 
 ```c
 struct rf_frame {
     uint16_t magic;          /* 0xA55A */
     uint16_t seq;            /* packet sequence, wraps at 65535 */
-    uint16_t sample_count;   /* fixed to 32 in this version */
+    uint16_t sample_count;   /* fixed to 96 in this version */
     uint16_t flags;          /* test-data flag for now */
     uint32_t timestamp_ms;   /* LP-side uptime timestamp */
-    int16_t samples[32];     /* 32 x 16-bit samples */
+    int16_t samples[96];     /* 96 x 16-bit samples */
 } __packed;
 ```
 
 ## Current Link Parameters
 
 - ESB mode: PTX/PRX
-- PHY: 1 Mbps
+- PHY: 4 Mbps on nRF54L15 when supported, otherwise 2 Mbps fallback
 - Channel: 40
-- ACK: enabled
-- Payload: 76-byte application frame
-- Sample frame: 32 x 16-bit samples
+- ACK: no-ACK streaming payloads
+- Payload: 204-byte application frame
+- Sample frame: 96 x 16-bit samples
 - Current TX sample target: 50 ksps x 16 bit, generated as one frame every
-  640 us.
+  1920 us.
+- UART status period: 1000 ms.
 
-The current 50 ksps setting is a stress target. Lab logs show the unoptimized
-1 Mbps ESB + ACK configuration currently receives about 286 to 306 kbps of
-effective payload, with high sequence loss. The stable earlier 50 kbps mode was
-32 samples every 10 ms.
+The current build is the `v0.5` throughput optimization firmware. The measured
+`v0.4` baseline with 1 Mbps ESB + ACK received about 286 to 306 kbps of
+effective payload with high sequence loss. This version raises RF headroom and
+reduces packet rate; hardware measurement is still required to confirm whether
+it reaches the full 800 kbps payload target.
 
 ## Build
 

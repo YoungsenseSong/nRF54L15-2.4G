@@ -81,3 +81,29 @@ Result:
 - Current 1 Mbps ESB + ACK configuration is throughput-limited for 50 ksps.
 Next:
 - Evaluate 2 Mbps/4 Mbps PHY, reduced ACK overhead, larger frames, or streaming no-ACK mode.
+
+2026-04-23 - v0.5 RF throughput optimization build
+What changed:
+- rf_link_tx/src/proto.h and rf_link_rx/src/proto.h increased frame payload from 32 to 96 samples.
+- rf_link_tx/src/proto.h and rf_link_rx/src/proto.h set the 50 ksps period to 1920 us and status period to 1000 ms.
+- rf_link_tx/src/radio_link.c and rf_link_rx/src/radio_link.c select ESB 4 Mbps on nRF54L15, with 2 Mbps fallback.
+- rf_link_tx/src/radio_link.c sends streaming payloads with no-ACK and disables retransmission count.
+- rf_link_rx/src/radio_link.c enables matching selective auto-ACK configuration for no-ACK payload handling.
+- rf_link_tx/src/tx_queue.c increases HP queue depth from 16 to 64 frames.
+- rf_link_tx/flpr_app/src/main.c removes the LP software queue from the active path and sends generated frames directly over IPC.
+- rf_link_tx/flpr_app/src/ipc_tx.c reduces IPC retry sleep from 1 ms to 50 us.
+- rf_link_tx/flpr_app/CMakeLists.txt stops building the inactive sample_buffer.c helper.
+- rf_link_tx/src/main.c changes TX status printing from packet-count-based to 1000 ms time-based output and shortens RF send timeout to 5 ms.
+- rf_link_rx/src/main.c changes RX status output to the shared 1000 ms status period.
+- rf_link_tx/prj.conf and rf_link_rx/prj.conf raise ESB max payload and FIFO sizes for 204-byte frames.
+Why:
+- v0.4 showed the 1 Mbps ACK path had MAC latency longer than the 640 us production period.
+- Larger frames reduce packet rate from 1562.5 pps to about 520.8 pps for the same 50 ksps payload.
+- No-ACK streaming removes ACK turnaround from the payload data path.
+Observed:
+- TX dual-core sysbuild completes successfully.
+- RX single-core build completes successfully.
+Result:
+- v0.5 firmware is ready for hardware UART/CSV throughput measurement.
+Next:
+- Flash both boards, capture TX/RX CSV for at least 60 seconds, and update EXP-001 with actual bps, lost, q_drop, and latency.
