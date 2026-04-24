@@ -71,23 +71,40 @@ int main(void)
 	struct rx_reorder_stats rx_stats;
 	uint32_t last_bytes = 0;
 	int64_t last_ms;
+	bool stream_mode = false;
 	int ret;
+
+	(void)debug_uart_init();
+	print_boot_line();
+
+#if defined(CONFIG_RF_LINK_RX_SAMPLE_STREAM)
+	if (debug_uart_ready()) {
+		debug_uart_puts("rx_sample_stream enabled, switch host to baud=");
+		debug_uart_u32(CONFIG_RF_LINK_RX_SAMPLE_STREAM_UART_BAUD);
+		debug_uart_crlf();
+	}
+#endif
 
 	if (IS_ENABLED(CONFIG_RF_LINK_RX_SAMPLE_STREAM)) {
 		ret = rx_sample_stream_init();
 		if (ret != 0) {
-			return ret;
+			if (debug_uart_ready()) {
+				debug_uart_puts("rx_sample_stream init failed err=");
+				debug_uart_i32(ret);
+				debug_uart_crlf();
+				debug_uart_puts("fall back to RX stat mode");
+				debug_uart_crlf();
+			}
+		} else {
+			stream_mode = true;
 		}
-	} else {
-		(void)debug_uart_init();
-		print_boot_line();
 	}
 
 	rx_reorder_init();
 
 	ret = radio_link_init();
 	if (ret != 0) {
-		if (!rx_sample_stream_active()) {
+		if (!stream_mode) {
 			debug_uart_puts("radio init failed err=");
 			debug_uart_i32(ret);
 			debug_uart_crlf();
@@ -95,7 +112,7 @@ int main(void)
 		return ret;
 	}
 
-	if (!rx_sample_stream_active()) {
+	if (!stream_mode) {
 		debug_uart_puts("radio ready, waiting packets");
 		debug_uart_crlf();
 	}
@@ -103,7 +120,7 @@ int main(void)
 	last_ms = k_uptime_get();
 	while (1) {
 		k_sleep(K_MSEC(RF_LINK_STATUS_PERIOD_MS));
-		if (!rx_sample_stream_active()) {
+		if (!stream_mode) {
 			print_stats(last_bytes, last_ms);
 			rx_reorder_stats_get(&rx_stats);
 			last_bytes = rx_stats.bytes;

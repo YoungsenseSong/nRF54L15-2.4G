@@ -107,7 +107,7 @@ west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp 
 Build the optional RX sample-stream variant:
 
 ```powershell
-west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
 
 ## Flash
@@ -212,9 +212,11 @@ python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Proj
 That command exports the deterministic fake-ADC pattern from
 `rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured samples.
 
-For real received samples, build RX with `stream.conf`. In this mode RX no
-longer prints `RX stat ...` text. It outputs accepted frames as binary records
-on `COM7` at `2000000` baud.
+For real received samples, build RX with `stream.conf` into the dedicated
+`build_rf_link_rx_stream` directory. In this mode RX no longer prints
+`RX stat ...` text. It outputs accepted frames as binary records on `COM7` at
+`2000000` baud. The default `build_rf_link_rx` directory remains the normal
+statistics build.
 
 If `pyserial` is not installed yet:
 
@@ -225,8 +227,8 @@ python -m pip install pyserial
 Build and flash the RX stream variant:
 
 ```powershell
-west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
-west flash -d build_rf_link_rx
+west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west flash -d build_rf_link_rx_stream
 ```
 
 Capture real received frames to CSV:
