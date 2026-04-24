@@ -143,6 +143,27 @@ Result:
 Next:
 - Capture longer-duration CSV evidence and replace the fake sampler with ADC DMA when the acquisition side is ready.
 
+2026-04-24 - v0.6 RX binary sample stream export
+What changed:
+- applications/rf_link_rx/src/rx_sample_stream.c and rx_sample_stream.h add an optional accepted-frame binary export path on uart30.
+- applications/rf_link_rx/stream.conf enables the export mode, sets uart30 to 2000000 baud at runtime, and enables UART runtime configure support.
+- applications/rf_link_rx/src/rx_reorder.c now taps each accepted rf_frame into the optional stream queue.
+- applications/rf_link_rx/src/main.c keeps the default statistics-only build unchanged and suppresses text RX status output when stream mode is active.
+- dump_rx_frames.py captures the binary records on the PC side and saves one CSV row per accepted RF frame under 2.4g_results.
+- applications/rf_link_rx/sample.yaml adds a build-only stream variant so CI can compile the export mode explicitly.
+Why:
+- save_serial_csv.py only stores UART statistics, not real received samples.
+- Future ADC integration and downstream processing need a host-visible export path for accepted RF frames.
+- The default stable RF link should remain untouched until stream mode is explicitly requested.
+Observed:
+- The default build_rf_link_rx build still succeeds and produces merged.hex.
+- A dedicated stream.conf build also succeeds locally.
+- dump_rx_frames.py passes record-format self-test with the firmware-side 224-byte binary record.
+Result:
+- v0.6 adds a real RX sample export path without changing the default link structure or default statistics workflow.
+Next:
+- Flash the stream build to RX, capture COM7 at 2000000 baud, and verify on hardware that stream_drop_total stays low while RF throughput remains stable.
+
 Detailed Version Notes
 ======================
 
@@ -281,3 +302,66 @@ Current understanding
   - corrected ICMSG send semantics
   - correct PBUF sizing for 204-byte frames
   - absolute-deadline pacing on LP
+
+Version focus: v0.6 RX sample stream export
+-------------------------------------------
+
+Goal
+- Export real accepted RX frames to the host PC without rewriting the RF link.
+- Keep the default `RX stat ...` workflow unchanged unless export mode is enabled.
+- Prepare a stable handoff path for future real ADC data and downstream processing.
+
+Why the old UART statistics path was not enough
+- `save_serial_csv.py` records only `RX stat ...` and `TX stat ...`.
+- The RX firmware printed counters and sample boundaries, not the 96-sample payload array.
+- Even after replacing the fake TX sampler with real ADC, the old statistics UART would still not expose full sample data.
+
+Design choice for v0.6
+- Do not stream raw samples from the RF callback directly.
+- Keep RX validation and sequence/loss accounting in place.
+- After a frame is accepted, copy it into a small buffered export queue.
+- Drain that queue from a dedicated thread that writes fixed-size binary records on uart30.
+- Keep this path behind `CONFIG_RF_LINK_RX_SAMPLE_STREAM` so the default build remains the current stable one.
+
+Why not keep using text UART output
+- `16-bit * 50 ksps` payload is about `800 kbps` before any UART framing overhead.
+- Text CSV on UART would consume much more bandwidth than the RF payload itself.
+- A binary fixed-size record is much closer to the real payload size and is easier to parse reliably.
+
+Code-level v0.6 direction
+- RX firmware:
+  - `applications/rf_link_rx/src/rx_sample_stream.c`
+  - `applications/rf_link_rx/src/rx_sample_stream.h`
+  - `applications/rf_link_rx/src/rx_reorder.c`
+  - `applications/rf_link_rx/src/main.c`
+- Build/config:
+  - `applications/rf_link_rx/stream.conf`
+  - `applications/rf_link_rx/sample.yaml`
+- Host capture:
+  - `dump_rx_frames.py`
+
+Binary record format
+- Each UART export record is fixed at `224 bytes`.
+- Record layout:
+  - stream magic
+  - record length
+  - stream version
+  - stream frame index
+  - cumulative stream drop count
+  - RX uptime in ms
+  - one complete `rf_frame`
+- The PC script resynchronizes on the stream magic and writes one CSV row per RF frame.
+
+How v0.6 keeps the current link stable
+- Default `build_rf_link_rx` still prints `RX stat ...` at 115200 baud.
+- Stream export is enabled only through `stream.conf`.
+- The RF path, protocol, queueing, and TX side are unchanged.
+- The only hot-path addition is one bounded copy into a non-blocking queue after frame acceptance.
+
+Current limitation
+- v0.6 is validated locally at build and parser-format level.
+- Hardware validation of continuous stream capture is still needed.
+- The first hardware check should confirm:
+  - RF throughput remains near the current working state
+  - `stream_drop_total` remains low during capture
+  - the PC can sustain long CSV writes at the chosen baud

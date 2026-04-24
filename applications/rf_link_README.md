@@ -7,8 +7,11 @@ nRF54L15 Connect Kit.
 
 - `rf_link_tx`: transmitter, built as a dual-core sysbuild application.
 - `rf_link_rx`: receiver, built as a single-core `cpuapp` application.
+- `rf_link_rx/stream.conf`: optional RX sample-stream export configuration.
 - `save_serial_csv.py`: PC-side serial parser that stores TX/RX status lines as
   CSV without requiring raw sample data on the UART.
+- `dump_rx_frames.py`: PC-side binary RX frame capture tool for the optional
+  v0.6 stream build.
 - `export_fake_adc_csv.py`: host-side exporter for the current TX fake ADC
   source pattern.
 
@@ -24,7 +27,7 @@ cpuapp HP core -> TX queue -> ESB PTX -> private 2.4 GHz radio
 Receiver:
 
 ```text
-ESB PRX -> frame validation -> sequence/loss statistics -> UART status output
+ESB PRX -> frame validation -> sequence/loss statistics -> optional rx_sample_stream tap -> UART status output or binary frame stream
 ```
 
 ## Frame Format
@@ -42,6 +45,11 @@ struct rf_frame {
 } __packed;
 ```
 
+Raw sample arrays are intentionally not printed on the default statistics UART.
+In the optional `v0.6` stream build, accepted frames are exported as binary
+records instead of text so the serial port does not become the measurement
+bottleneck.
+
 ## Current Link Parameters
 
 - ESB mode: PTX/PRX
@@ -54,14 +62,14 @@ struct rf_frame {
   1920 us.
 - UART status period: 1000 ms.
 
-The current build is the `v0.5` throughput optimization firmware plus the
-2026-04-24 bring-up fixes. The measured `v0.4` baseline with 1 Mbps ESB + ACK
-received about 286 to 306 kbps of effective payload with high sequence loss.
-The current working state uses 4 Mbps preferred, no-ACK, 96-sample frames,
-204-byte wire payloads, corrected ICMSG handling, and LP absolute-deadline
-pacing. Bench operation is now reported stable near the 800 kbps payload
-target. Detailed version-specific optimization rationale is recorded in
-`applications/rf_link_development_log.txt`.
+The default RX build still matches the `v0.5` throughput optimization firmware
+plus the 2026-04-24 bring-up fixes. The measured `v0.4` baseline with 1 Mbps
+ESB + ACK received about 286 to 306 kbps of effective payload with high
+sequence loss. The current working state uses 4 Mbps preferred, no-ACK,
+96-sample frames, 204-byte wire payloads, corrected ICMSG handling, and LP
+absolute-deadline pacing. Bench operation is now reported stable near the
+800 kbps payload target. `v0.6` adds an optional RX sample-stream export mode
+without changing the default statistics-only behavior.
 
 ## Common Communication Parameters
 
@@ -94,6 +102,12 @@ cd D:\nRF54L15\NCS-Project
 cd nrf54l15-connectkit
 west build -p always --sysbuild -d build_rf_link_tx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
 west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
+```
+
+Build the optional RX sample-stream variant:
+
+```powershell
+west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
 
 ## Flash
@@ -188,8 +202,8 @@ Use two terminals if TX and RX should be captured at the same time.
 per-sample payload arrays because the current firmware does not print raw
 samples on UART.
 
-If you need a CSV of the current TX-side fake source pattern without changing
-firmware, use:
+If you need the current TX-side fake source pattern without changing firmware,
+use:
 
 ```powershell
 python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results"
@@ -197,5 +211,31 @@ python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Proj
 
 That command exports the deterministic fake-ADC pattern from
 `rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured samples.
-Actual received sample export would require firmware to emit raw frame data
-over UART or another host-visible interface.
+
+For real received samples, build RX with `stream.conf`. In this mode RX no
+longer prints `RX stat ...` text. It outputs accepted frames as binary records
+on `COM7` at `2000000` baud.
+
+If `pyserial` is not installed yet:
+
+```powershell
+python -m pip install pyserial
+```
+
+Build and flash the RX stream variant:
+
+```powershell
+west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west flash -d build_rf_link_rx
+```
+
+Capture real received frames to CSV:
+
+```powershell
+python .\dump_rx_frames.py --port COM7
+python .\dump_rx_frames.py --port COM7 --max-frames 1000 --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
+```
+
+`dump_rx_frames.py` writes one CSV row per accepted RF frame with metadata plus
+`sample_0` to `sample_95`. The default output directory is
+`D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results`.

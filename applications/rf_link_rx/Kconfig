@@ -1,1 +1,38 @@
+menu "RF Link RX options"
+
+config RF_LINK_RX_SAMPLE_STREAM
+	bool "Enable accepted-frame binary stream on RX UART"
+	default n
+	help
+	  Copy each accepted rf_frame into a binary UART stream after RX validation.
+	  This keeps the default statistics-only build unchanged and enables a
+	  dedicated host-side capture path when explicitly turned on.
+
+config RF_LINK_RX_SAMPLE_STREAM_UART_BAUD
+	int "RX sample stream UART baud rate"
+	depends on RF_LINK_RX_SAMPLE_STREAM
+	range 115200 4000000
+	default 2000000
+	help
+	  UART baud rate used when the RX sample stream is enabled.
+
+config RF_LINK_RX_SAMPLE_STREAM_BUFFERED_RECORDS
+	int "Number of buffered RX stream records"
+	depends on RF_LINK_RX_SAMPLE_STREAM
+	range 4 128
+	default 32
+	help
+	  Number of accepted frames buffered between the RF callback and the UART
+	  stream thread.
+
+config RF_LINK_RX_SAMPLE_STREAM_THREAD_STACK_SIZE
+	int "RX sample stream thread stack size"
+	depends on RF_LINK_RX_SAMPLE_STREAM
+	range 1024 8192
+	default 2048
+	help
+	  Stack size for the UART stream drain thread.
+
+endmenu
+
 source "Kconfig.zephyr"

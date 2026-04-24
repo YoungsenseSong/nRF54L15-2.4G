@@ -125,3 +125,29 @@ python .\save_serial_csv.py --port COM8 --output experiments\20260419_v0.4_tx.cs
 ```
 
 No raw sample dump is required on UART for the current statistics workflow.
+
+## Experiment 5 - v0.6 Optional RX Sample Stream Export
+
+- Date: 2026-04-24
+- Firmware: `v0.6-rx-sample-stream-export`
+- Goal: export accepted RX frames as real sample data for host CSV capture and later downstream processing.
+- RF parameters: unchanged from the current `v0.5` working state.
+- RX export parameters:
+  - `stream.conf` enables `CONFIG_RF_LINK_RX_SAMPLE_STREAM=y`
+  - RX switches `uart30` to `2000000` baud
+  - RX stops printing `RX stat ...` text and outputs fixed-size binary records
+- Build result:
+  - default `build_rf_link_rx` still passes locally
+  - stream-enabled `build_rf_link_rx_stream_verify` also passes locally
+- Host capture command:
+
+```powershell
+python .\dump_rx_frames.py --port COM7
+python .\dump_rx_frames.py --port COM7 --max-frames 1000 --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
+```
+
+- Output format:
+  - one CSV row per accepted RF frame
+  - metadata fields plus `sample_0` to `sample_95`
+  - `stream_drop_total` is included so UART-side export pressure can be checked separately from RF loss
+- Hardware result: pending bench verification.

@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <zephyr/sys/atomic.h>
 
+#include "rx_sample_stream.h"
+
 static atomic_t frames;
 static atomic_t samples;
 static atomic_t bytes;
@@ -71,6 +73,7 @@ int rx_reorder_process_frame(const struct rf_frame *frame, uint8_t len)
 	atomic_inc(&frames);
 	atomic_add(&samples, frame->sample_count);
 	atomic_add(&bytes, frame->sample_count * sizeof(frame->samples[0]));
+	rx_sample_stream_submit_frame(frame);
 
 	return 0;
 }

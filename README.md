@@ -17,7 +17,7 @@ application, experiment records, and current performance findings.
 - Exchange TX-side data between LP and HP cores through `ipc_service` + `icmsg`.
 - Send framed 16-bit sample data over ESB.
 - Receive data on a simple single-core RX application.
-- Export UART statistics and CSV logs for later paper/patent evidence.
+- Export UART statistics and optional real RX frame CSV logs for later paper/patent evidence.
 
 ## Repository Entry Points
 
@@ -26,6 +26,7 @@ application, experiment records, and current performance findings.
 | `applications/rf_link_tx/` | Dual-core transmitter application. |
 | `applications/rf_link_tx/flpr_app/` | LP core child image for fake sampling and IPC TX. |
 | `applications/rf_link_rx/` | Single-core receiver application. |
+| `applications/rf_link_rx/stream.conf` | Optional RX sample-stream capture configuration. |
 | `applications/rf_link_README.md` | Application-level README with build, flash, and UART use. |
 | `applications/rf_link_DESIGN.md` | Architecture and design notes. |
 | `applications/rf_link_development_log.txt` | Short devlog for each development step. |
@@ -34,6 +35,7 @@ application, experiment records, and current performance findings.
 | `applications/rf_link_parameter_matrix.csv` | Version/parameter comparison table. |
 | `applications/rf_link_tag_notes/` | Five-line notes for each project tag. |
 | `save_serial_csv.py` | PC-side UART statistics to CSV capture tool. |
+| `dump_rx_frames.py` | PC-side binary RX frame capture tool for the optional v0.6 stream build. |
 | `export_fake_adc_csv.py` | Host-side exporter for the current TX fake-ADC sample pattern. |
 
 ## Current Architecture
@@ -61,7 +63,8 @@ RX cpuapp
   ESB PRX radio receiver
   frame validation
   sequence/loss statistics
-  UART status output
+  optional rx_sample_stream tap
+  UART status output or binary frame stream
 ```
 
 ## Current Frame Format
@@ -79,9 +82,10 @@ struct rf_frame {
 } __packed;
 ```
 
-Raw sample arrays are intentionally not printed on UART. UART output is limited
-to application statistics and latency fields so that the serial port does not
-become the measurement bottleneck.
+Raw sample arrays are intentionally not printed on the default statistics UART.
+In the optional `v0.6` stream build, accepted frames are exported as binary
+records instead of text so the serial port does not become the measurement
+bottleneck.
 
 ## Current Radio Parameters
 
@@ -108,6 +112,7 @@ Two key operating points have been recorded:
 | `v0.3-rf-link-docs-devlog` baseline notes | 16-bit 50 kbps-class link | 32 samples every 10 ms, about 51.2 kbps payload target. |
 | `v0.4-50ksps-load-test` | 50 ksps x 16-bit, 800 kbps payload | RX observed about 286 to 306 kbps with high sequence loss and TX queue drops. |
 | `v0.5-rf-throughput-optimization` | Increase RF headroom for 50 ksps | 4 Mbps/no-ACK/96-sample frame firmware builds completed. The 2026-04-24 intermediate stable excerpt before deadline pacing reached `774144 bps`, and the current working state after deadline pacing reaches about `800256 bps` or about `50016 sps`. |
+| `v0.6-rx-sample-stream-export` | Add real RX sample export without changing the default link path | Default RX build remains statistics-only. An optional `stream.conf` build adds accepted-frame binary export on `COM7` at `2000000` baud plus `dump_rx_frames.py` for CSV capture. Both builds pass locally; hardware stream capture is the next bench step. |
 
 The latest measured 50 ksps test (`v0.4`) shows the old
 `1 Mbps ESB + ACK + 76-byte frame` configuration is throughput-limited. The
@@ -161,6 +166,12 @@ Build RX single-core application:
 
 ```powershell
 west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
+```
+
+Build the optional RX sample-stream variant in the same fixed build directory:
+
+```powershell
+west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
 
 ## Flash
@@ -261,8 +272,8 @@ python .\save_serial_csv.py --port COM11 --output tx_stats.csv
 per-sample payload arrays because the current firmware does not print raw
 samples on UART.
 
-If you need a CSV of the current TX-side fake data source without changing
-firmware, use:
+If you need the current TX-side fake source pattern without changing firmware,
+use:
 
 ```powershell
 python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results"
@@ -270,8 +281,35 @@ python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Proj
 
 That command exports the deterministic fake-ADC pattern from
 `applications/rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured
-samples. Actual received sample export would require firmware to emit raw frame
-data over UART or another host-visible interface.
+samples.
+
+For real received samples, use the optional `v0.6` RX stream build. In this
+mode RX stops printing `RX stat ...` text and instead outputs accepted frames
+as binary records on `COM7` at `2000000` baud.
+
+If `pyserial` is not installed yet:
+
+```powershell
+python -m pip install pyserial
+```
+
+Build and flash the RX stream variant:
+
+```powershell
+west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west flash -d build_rf_link_rx
+```
+
+Then capture real received frames to CSV:
+
+```powershell
+python .\dump_rx_frames.py --port COM7
+python .\dump_rx_frames.py --port COM7 --max-frames 1000 --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
+```
+
+`dump_rx_frames.py` saves one CSV row per accepted RF frame with metadata plus
+`sample_0` to `sample_95`. The default output directory is
+`D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results`.
 
 ## Milestone Tags
 
@@ -282,6 +320,7 @@ data over UART or another host-visible interface.
 | `v0.3-rf-link-docs-devlog` | README, design notes, devlog, experiment records. |
 | `v0.4-50ksps-load-test` | 50 ksps x 16-bit stress test evidence. |
 | `v0.5-rf-throughput-optimization` | 4 Mbps/no-ACK/96-sample throughput optimization build. |
+| `v0.6-rx-sample-stream-export` | Optional accepted-frame binary export and host CSV dump tool. |
 
 Each tag has a short note under `applications/rf_link_tag_notes/`.
 
@@ -292,10 +331,11 @@ the first combined optimization build; the remaining work is measurement and
 controlled comparison:
 
 1. Measure `v0.5` at fixed distance and record RX bps/lost plus TX q_drop/MAC latency.
-2. Run a controlled 2 Mbps comparison if 4 Mbps is unstable in range tests.
-3. Evaluate ACK-on or batch-ACK control frames after no-ACK payload capacity is known.
-4. Add GPIO timing probes for hardware latency measurement.
-5. Replace fake samples with ADC DMA after RF throughput has enough margin.
+2. Validate `v0.6` on hardware and confirm `stream_drop_total` stays low during real CSV capture.
+3. Run a controlled 2 Mbps comparison if 4 Mbps is unstable in range tests.
+4. Evaluate ACK-on or batch-ACK control frames after no-ACK payload capacity is known.
+5. Add GPIO timing probes for hardware latency measurement.
+6. Replace fake samples with ADC DMA after RF throughput and v0.6 export path both remain stable.
 
 The tracking table is:
 

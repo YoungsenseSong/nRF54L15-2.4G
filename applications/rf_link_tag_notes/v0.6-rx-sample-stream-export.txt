@@ -1,0 +1,5 @@
+Version target: add real RX sample export while keeping the default RF link workflow unchanged.
+Changed modules: rf_link_rx stream.conf, rx_sample_stream, main, rx_reorder, sample.yaml, and dump_rx_frames.py.
+Runnable result: default RX build and stream-enabled RX build both pass locally.
+Known issues: hardware validation of long-running stream capture at 2000000 baud is still pending.
+Evidence path: applications/rf_link_development_log.txt and README stream-capture instructions.

@@ -49,3 +49,8 @@ no-ACK + larger frames`; it also depended on correct ICMSG send semantics,
 PBUF sizing for the 204-byte frame, and LP absolute-deadline pacing. Later
 rows should still isolate one variable at a time and compare against both
 EXP-000 and the fixed EXP-001 working state.
+
+Support-tooling note: `v0.6-rx-sample-stream-export` does not change the RF
+parameter set in `EXP-001`. It adds an optional RX-side accepted-frame export
+path so future ADC integration and downstream processing can be validated with
+real received samples instead of statistics only.

@@ -5,6 +5,7 @@
 #include "proto.h"
 #include "radio_link.h"
 #include "rx_reorder.h"
+#include "rx_sample_stream.h"
 
 static void print_boot_line(void)
 {
@@ -72,28 +73,41 @@ int main(void)
 	int64_t last_ms;
 	int ret;
 
-	(void)debug_uart_init();
-	print_boot_line();
+	if (IS_ENABLED(CONFIG_RF_LINK_RX_SAMPLE_STREAM)) {
+		ret = rx_sample_stream_init();
+		if (ret != 0) {
+			return ret;
+		}
+	} else {
+		(void)debug_uart_init();
+		print_boot_line();
+	}
 
 	rx_reorder_init();
 
 	ret = radio_link_init();
 	if (ret != 0) {
-		debug_uart_puts("radio init failed err=");
-		debug_uart_i32(ret);
-		debug_uart_crlf();
+		if (!rx_sample_stream_active()) {
+			debug_uart_puts("radio init failed err=");
+			debug_uart_i32(ret);
+			debug_uart_crlf();
+		}
 		return ret;
 	}
 
-	debug_uart_puts("radio ready, waiting packets");
-	debug_uart_crlf();
+	if (!rx_sample_stream_active()) {
+		debug_uart_puts("radio ready, waiting packets");
+		debug_uart_crlf();
+	}
 
 	last_ms = k_uptime_get();
 	while (1) {
 		k_sleep(K_MSEC(RF_LINK_STATUS_PERIOD_MS));
-		print_stats(last_bytes, last_ms);
-		rx_reorder_stats_get(&rx_stats);
-		last_bytes = rx_stats.bytes;
-		last_ms = k_uptime_get();
+		if (!rx_sample_stream_active()) {
+			print_stats(last_bytes, last_ms);
+			rx_reorder_stats_get(&rx_stats);
+			last_bytes = rx_stats.bytes;
+			last_ms = k_uptime_get();
+		}
 	}
 }

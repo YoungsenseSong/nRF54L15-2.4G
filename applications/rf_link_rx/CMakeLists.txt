@@ -15,6 +15,7 @@ target_sources(app PRIVATE
   src/debug_uart.c
   src/radio_link.c
   src/rx_reorder.c
+  src/rx_sample_stream.c
 )
 
 target_include_directories(app PRIVATE src)
