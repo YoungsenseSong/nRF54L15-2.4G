@@ -13,6 +13,11 @@
 				    RF_LINK_TARGET_SAMPLE_HZ)
 #define RF_LINK_STATUS_PERIOD_MS   1000u
 #define RF_LINK_NOACK_STREAM       1u
+#define RF_LINK_LP_START_DELAY_MS  0u
+#define RF_LINK_LP_WARMUP_FRAMES   16u
+#define RF_LINK_LP_WARMUP_PERIOD_MS 10u
+#define RF_LINK_LP_IPC_SEND_TIMEOUT_MS 5u
+#define RF_LINK_LP_USE_ABSOLUTE_PACING 1u
 
 struct rf_frame {
 	uint16_t magic;
@@ -27,6 +32,8 @@ struct rf_frame {
 
 BUILD_ASSERT(RF_LINK_FRAME_WIRE_SIZE == 204u,
 	     "rf_frame wire size must stay fixed for this RF protocol revision");
+BUILD_ASSERT(CONFIG_PBUF_RX_READ_BUF_SIZE >= RF_LINK_FRAME_WIRE_SIZE,
+	     "PBUF RX buffer must be large enough for rf_frame IPC payloads");
 BUILD_ASSERT(((RF_LINK_FRAME_SAMPLE_COUNT * 1000000u) %
 	      RF_LINK_TARGET_SAMPLE_HZ) == 0u,
 	     "RF_LINK_TX_PERIOD_US must be an integer number of microseconds");

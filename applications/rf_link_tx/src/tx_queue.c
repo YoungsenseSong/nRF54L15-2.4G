@@ -8,6 +8,8 @@
 
 K_MSGQ_DEFINE(tx_frame_msgq, sizeof(struct rf_frame), TX_QUEUE_DEPTH, 4);
 
+static struct rf_frame discard_frame;
+
 static atomic_t pushed;
 static atomic_t popped;
 static atomic_t dropped;
@@ -23,7 +25,6 @@ void tx_queue_init(void)
 int tx_queue_submit(const struct rf_frame *frame)
 {
 	int ret;
-	struct rf_frame discard;
 
 	ret = k_msgq_put(&tx_frame_msgq, frame, K_NO_WAIT);
 	if (ret == 0) {
@@ -32,7 +33,7 @@ int tx_queue_submit(const struct rf_frame *frame)
 	}
 
 	if (ret == -ENOMSG) {
-		ret = k_msgq_get(&tx_frame_msgq, &discard, K_NO_WAIT);
+		ret = k_msgq_get(&tx_frame_msgq, &discard_frame, K_NO_WAIT);
 		if (ret == 0) {
 			atomic_inc(&dropped);
 			ret = k_msgq_put(&tx_frame_msgq, frame, K_NO_WAIT);

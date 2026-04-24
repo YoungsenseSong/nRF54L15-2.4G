@@ -4,6 +4,7 @@
 
 #include "debug_uart.h"
 #include "ipc_bridge.h"
+#include "lp_trace.h"
 #include "proto.h"
 #include "radio_link.h"
 #include "tx_queue.h"
@@ -22,18 +23,23 @@ static void print_boot_line(void)
 	debug_uart_u32(RF_LINK_FRAME_SAMPLE_COUNT);
 	debug_uart_puts(",period_us=");
 	debug_uart_u32(RF_LINK_TX_PERIOD_US);
+	debug_uart_puts(",lp_pace=");
+	debug_uart_puts(RF_LINK_LP_USE_ABSOLUTE_PACING ? "deadline" : "relative");
 	debug_uart_crlf();
 }
 
 static void print_status(uint32_t sent_frames)
 {
 	struct ipc_bridge_stats ipc_stats;
+	struct rf_link_lp_trace lp_trace;
 	struct tx_queue_stats queue_stats;
 	struct radio_link_stats radio_stats;
+	bool have_lp_trace;
 
 	ipc_bridge_stats_get(&ipc_stats);
 	tx_queue_stats_get(&queue_stats);
 	radio_link_stats_get(&radio_stats);
+	have_lp_trace = rf_link_lp_trace_snapshot(&lp_trace);
 
 	debug_uart_puts("TX stat sent=");
 	debug_uart_u32(sent_frames);
@@ -43,12 +49,18 @@ static void print_status(uint32_t sent_frames)
 	debug_uart_u32(ipc_stats.queued);
 	debug_uart_puts(" q_drop=");
 	debug_uart_u32(queue_stats.dropped + ipc_stats.queue_drop);
+	debug_uart_puts(" ipc_bad_size=");
+	debug_uart_u32(ipc_stats.bad_size);
+	debug_uart_puts(" ipc_bad_magic=");
+	debug_uart_u32(ipc_stats.bad_magic);
 	debug_uart_puts(" rf_ok=");
 	debug_uart_u32(radio_stats.tx_ok);
 	debug_uart_puts(" rf_fail=");
 	debug_uart_u32(radio_stats.tx_failed);
 	debug_uart_puts(" rf_timeout=");
 	debug_uart_u32(radio_stats.tx_timeout);
+	debug_uart_puts(" rf_err=");
+	debug_uart_u32(radio_stats.tx_errors);
 	debug_uart_puts(" attempts=");
 	debug_uart_u32(radio_stats.last_attempts);
 	debug_uart_puts(" mac_cnt=");
@@ -61,6 +73,26 @@ static void print_status(uint32_t sent_frames)
 	debug_uart_u32(radio_stats.mac_latency_avg_us);
 	debug_uart_puts(" mac_max_us=");
 	debug_uart_u32(radio_stats.mac_latency_max_us);
+	debug_uart_puts(" lp_stage=");
+	debug_uart_u32(have_lp_trace ? lp_trace.stage : 0u);
+	debug_uart_puts(" lp_boots=");
+	debug_uart_u32(have_lp_trace ? lp_trace.boot_count : 0u);
+	debug_uart_puts(" lp_fatal=");
+	debug_uart_u32(have_lp_trace ? lp_trace.fatal_count : 0u);
+	debug_uart_puts(" lp_fatal_reason=");
+	debug_uart_u32(have_lp_trace ? lp_trace.fatal_reason : 0u);
+	debug_uart_puts(" lp_loop=");
+	debug_uart_u32(have_lp_trace ? lp_trace.loop_count : 0u);
+	debug_uart_puts(" lp_seq=");
+	debug_uart_u32(have_lp_trace ? lp_trace.last_seq : 0u);
+	debug_uart_puts(" lp_ok=");
+	debug_uart_u32(have_lp_trace ? lp_trace.ipc_sent : 0u);
+	debug_uart_puts(" lp_busy=");
+	debug_uart_u32(have_lp_trace ? lp_trace.ipc_busy : 0u);
+	debug_uart_puts(" lp_fail=");
+	debug_uart_u32(have_lp_trace ? lp_trace.ipc_failed : 0u);
+	debug_uart_puts(" lp_ret=");
+	debug_uart_i32(have_lp_trace ? lp_trace.last_send_ret : 0);
 	debug_uart_crlf();
 }
 
@@ -96,6 +128,8 @@ int main(void)
 	debug_uart_puts("radio ready");
 	debug_uart_crlf();
 
+	debug_uart_puts("ipc init begin");
+	debug_uart_crlf();
 	ret = ipc_bridge_init();
 	if (ret != 0) {
 		debug_uart_puts("ipc init failed err=");
@@ -103,6 +137,8 @@ int main(void)
 		debug_uart_crlf();
 		return ret;
 	}
+	debug_uart_puts("ipc init ok");
+	debug_uart_crlf();
 
 	debug_uart_puts("waiting for LP IPC endpoint");
 	debug_uart_crlf();

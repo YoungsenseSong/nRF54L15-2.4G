@@ -11,6 +11,7 @@ project(rf_link_tx)
 
 # NORDIC SDK APP START
 target_sources(app PRIVATE
+  src/fatal_diag.c
   src/main.c
   src/debug_uart.c
   src/ipc_bridge.c

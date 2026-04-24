@@ -11,6 +11,10 @@
 			sram_rx: memory@20020000 {
 				reg = <0x20020000 0x0800>;
 			};
+
+			rf_link_lp_trace_mem: memory@20020800 {
+				reg = <0x20020800 0x0100>;
+			};
 		};
 	};
 

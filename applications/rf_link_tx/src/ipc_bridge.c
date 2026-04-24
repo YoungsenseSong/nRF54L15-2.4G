@@ -25,6 +25,8 @@ static atomic_t bad_magic;
 static atomic_t queued;
 static atomic_t queue_drop;
 
+static struct rf_frame rx_frame_copy;
+
 static void bridge_bound(void *priv)
 {
 	ARG_UNUSED(priv);
@@ -33,25 +35,24 @@ static void bridge_bound(void *priv)
 
 static void bridge_received(const void *data, size_t len, void *priv)
 {
-	struct rf_frame frame;
 	int ret;
 
 	ARG_UNUSED(priv);
 	atomic_inc(&received);
 
-	if (len != sizeof(frame)) {
+	if (len != sizeof(rx_frame_copy)) {
 		atomic_inc(&bad_size);
 		return;
 	}
 
-	memcpy(&frame, data, sizeof(frame));
-	if (frame.magic != RF_LINK_MAGIC ||
-	    frame.sample_count > RF_LINK_FRAME_SAMPLE_COUNT) {
+	memcpy(&rx_frame_copy, data, sizeof(rx_frame_copy));
+	if (rx_frame_copy.magic != RF_LINK_MAGIC ||
+	    rx_frame_copy.sample_count > RF_LINK_FRAME_SAMPLE_COUNT) {
 		atomic_inc(&bad_magic);
 		return;
 	}
 
-	ret = tx_queue_submit(&frame);
+	ret = tx_queue_submit(&rx_frame_copy);
 	if (ret == 0) {
 		atomic_inc(&queued);
 	} else {

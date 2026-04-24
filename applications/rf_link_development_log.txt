@@ -107,3 +107,38 @@ Result:
 - v0.5 firmware is ready for hardware UART/CSV throughput measurement.
 Next:
 - Flash both boards, capture TX/RX CSV for at least 60 seconds, and update EXP-001 with actual bps, lost, q_drop, and latency.
+
+2026-04-24 - Zero-throughput debug closure for the 204-byte IPC/RF path
+What changed:
+- rf_link_tx/flpr_app/src/ipc_tx.c now accepts both return 0 and returned byte count as successful ipc_service_send() results, and retries -ENOMEM, -EAGAIN, -EBUSY, and -ENOBUFS.
+- rf_link_tx/src/lp_trace.h plus both TX overlay files add a shared LP trace area with boot, stage, sequence, IPC, and fatal counters.
+- rf_link_tx/src/main.c prints ipc_bad_size, ipc_bad_magic, lp_stage, lp_boots, lp_fatal, lp_fatal_reason, lp_loop, lp_seq, lp_ok, lp_busy, lp_fail, and lp_ret.
+- rf_link_rx/src/main.c prints rf_evt, rf_frames, and rf_read_err so "no packets on air" and "packets read but rejected" are separated.
+- rf_link_tx/src/fatal_diag.c and rf_link_tx/flpr_app/src/fatal_diag.c add HP fatal UART output and LP fatal trace capture; both TX CMakeLists now build these sources.
+- rf_link_tx/prj.conf and rf_link_tx/flpr_app/prj.conf set CONFIG_PBUF_RX_READ_BUF_SIZE=256, and rf_link_tx/src/proto.h asserts that the PBUF RX buffer is not smaller than the 204-byte wire frame.
+Why:
+- After the v0.5 parameter change, TX first showed LP IPC bound but no frames were forwarded to RF, and RX stayed at zero.
+- After the first IPC-side fix, TX exposed HP fatal reason=4 during ipc_bridge_init(), which pointed to an ICMSG-side assertion instead of an RF problem.
+Observed:
+- On Zephyr ICMSG, ipc_service_send() success can return the sent byte count instead of 0.
+- Once real 204-byte frames started flowing, the default 128-byte PBUF RX buffer caused an ICMSG-side assert and TX restart.
+Result:
+- TX now reaches lp_stage=4 with sent=ipc_rx=queued=rf_ok and q_drop=0 in stable excerpts.
+- RX now reports frames, samples, and payload bitrate instead of staying at zero.
+Next:
+- Remove the remaining throughput gap between the requested 1920 us period and the measured payload rate.
+
+2026-04-24 - Absolute deadline pacing closes the remaining 50 ksps gap
+What changed:
+- rf_link_tx/flpr_app/src/main.c now supports absolute-deadline pacing based on k_cycle_get_64().
+- rf_link_tx/src/proto.h adds the RF_LINK_LP_USE_ABSOLUTE_PACING switch so deadline pacing can be disabled without reverting code.
+- rf_link_tx/src/main.c prints lp_pace=deadline or lp_pace=relative at boot.
+Why:
+- Relative k_sleep(K_USEC(1920)) made the real frame period equal to processing time plus 1920 us, which limited stable payload to about 504 fps or about 774 kbps.
+Observed:
+- Before deadline pacing, TX and RX were healthy but payload rate still lagged the 800 kbps target by about 3 percent.
+- After deadline pacing, operator bench runs reported the firmware stable near the 50 ksps x 16-bit target.
+Result:
+- The current working state is close to a full 16-bit x 50 ksps transport path.
+Next:
+- Capture longer-duration CSV evidence and replace the fake sampler with ADC DMA when the acquisition side is ready.

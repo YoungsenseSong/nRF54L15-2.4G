@@ -23,12 +23,14 @@ static void print_boot_line(void)
 
 static void print_stats(uint32_t last_bytes, int64_t last_ms)
 {
+	struct radio_link_stats radio_stats;
 	struct rx_reorder_stats rx_stats;
 	uint32_t delta_bytes;
 	uint32_t bps = 0;
 	int64_t now = k_uptime_get();
 	int64_t delta_ms = now - last_ms;
 
+	radio_link_stats_get(&radio_stats);
 	rx_reorder_stats_get(&rx_stats);
 
 	delta_bytes = rx_stats.bytes - last_bytes;
@@ -48,6 +50,12 @@ static void print_stats(uint32_t last_bytes, int64_t last_ms)
 	debug_uart_u32(rx_stats.duplicates);
 	debug_uart_puts(" bad=");
 	debug_uart_u32(rx_stats.bad_magic + rx_stats.bad_size);
+	debug_uart_puts(" rf_evt=");
+	debug_uart_u32(radio_stats.rx_events);
+	debug_uart_puts(" rf_frames=");
+	debug_uart_u32(radio_stats.rx_frames);
+	debug_uart_puts(" rf_read_err=");
+	debug_uart_u32(radio_stats.rx_read_errors);
 	debug_uart_puts(" seq=");
 	debug_uart_u32(rx_stats.last_seq);
 	debug_uart_puts(" first=");

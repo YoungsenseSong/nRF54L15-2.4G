@@ -3,4 +3,4 @@ v0.1-dualcore-ipc-ok,LP to HP IPC bring-up,N/A,N/A,N/A,32,76,N/A,N/A,N/A,N/A,Dua
 v0.2-rf-link-first-pass,Private 2.4G first pass,1Mbps,40,on,32,76,10ms,51200,about 51200,low under short range,Initial stable 50kbps-class link
 v0.3-16bit-50kbps-stable,16bit 50kbps validation,1Mbps,40,on,32,76,10ms,51200,about 51200,low under short range,Good baseline before stress test
 v0.4-50ksps-load-test,50ksps x 16bit stress,1Mbps,40,on,32,76,640us,800000,286000-306000,high,Throughput-limited by ESB ACK and MAC latency
-v0.5-rf-throughput-optimization,50ksps x 16bit throughput optimization,4Mbps preferred 2Mbps fallback,40,noack,96,204,1920us,800000,TBD,TBD,Build verified hardware measurement pending
+v0.5-rf-throughput-optimization,50ksps x 16bit throughput optimization,4Mbps preferred 2Mbps fallback,40,noack,96,204,1920us,800000,about 774000 before deadline pacing near 800000 after deadline pacing,low in stable excerpt,"Requires corrected ICMSG send semantics, PBUF RX 256, diagnostics, and LP absolute-deadline pacing"

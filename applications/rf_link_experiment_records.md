@@ -80,6 +80,34 @@ Record the actual distance, orientation, RX average `bps`, RX `lost` delta, TX
 `q_drop` delta, and TX MAC latency fields in
 `rf_link_experiment_logs/optimization_attempts.md` after the run.
 
+## Experiment 4 - v0.5 Bring-Up Debug Closure and Near-Target Throughput
+
+- Date: 2026-04-24
+- Firmware: `v0.5` working state after IPC, PBUF, diagnostics, and deadline-pacing fixes.
+- Target: recover the 50 ksps x 16-bit payload path and close the remaining gap to 800 kbps.
+- Initial failure symptoms:
+  - TX first showed LP IPC startup but no useful forward progress, while RX stayed at `frames=0 samples=0 bps=0`.
+  - After the first IPC fix, TX exposed `HP fatal reason=4` immediately after `ipc init begin`.
+- Root causes and fixes:
+  - `flpr_app/src/ipc_tx.c` accepted only return `0` as a successful `ipc_service_send()` result. This was fixed so returned byte count is also treated as success and busy/full conditions are retried.
+  - The new `204`-byte frame exceeded the default `CONFIG_PBUF_RX_READ_BUF_SIZE=128`, which caused an ICMSG-side assert. Both TX cores now use `CONFIG_PBUF_RX_READ_BUF_SIZE=256`, and `proto.h` asserts that PBUF RX size is not smaller than the wire frame.
+  - HP fatal UART output, LP shared trace memory, and extra TX/RX counters were added so the failure could be isolated to IPC or RF quickly.
+  - LP pacing was changed from relative `k_sleep(1920 us)` to optional absolute-deadline pacing to remove period drift.
+- Stable excerpt before deadline pacing:
+
+```text
+TX stat sent=51857 ipc_rx=51857 queued=51857 q_drop=0 ipc_bad_size=0 ipc_bad_magic=0 rf_ok=51857 rf_fail=0 rf_timeout=0 rf_err=0 attempts=1 mac_cnt=51857 mac_last_us=635 mac_min_us=620 mac_avg_us=631 mac_max_us=722 lp_stage=4 lp_boots=10 lp_fatal=4 lp_fatal_reason=0 lp_loop=51857 lp_seq=51856 lp_ok=51857 lp_busy=0 lp_fail=0 lp_ret=0
+RX stat frames=63130 samples=6060480 bps=774144 lost=0 dup=614 bad=0 rf_evt=63130 rf_frames=63130 rf_read_err=0 seq=62515 first=800 last=895
+```
+
+- Interpretation of the stable excerpt:
+  - `sent=ipc_rx=queued=rf_ok` means LP generation, IPC receive, HP queueing, and RF send were all in lockstep.
+  - `q_drop=0`, `lost=0`, `bad=0`, and `rf_read_err=0` mean the remaining issue was no longer packet corruption or pipeline collapse.
+  - `bps=774144` corresponds to about `504 fps`, which exposed the last timing gap caused by relative pacing.
+- Final working-state result:
+  - After LP absolute-deadline pacing was enabled, the operator reported the bench state as stable near the `800 kbps` payload target.
+  - This closes the original "TX no send info, RX zero" failure chain and leaves the main remaining work as long-duration CSV evidence and real ADC integration.
+
 ## CSV Output Locations
 
 Recommended naming:

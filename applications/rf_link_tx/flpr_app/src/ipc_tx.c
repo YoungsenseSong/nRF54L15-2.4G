@@ -74,12 +74,13 @@ int ipc_tx_send_frame(const struct rf_frame *frame, k_timeout_t timeout)
 
 	do {
 		ret = ipc_service_send(&lp_ept, frame, sizeof(*frame));
-		if (ret == 0) {
+		if (ret == 0 || ret == (int)sizeof(*frame)) {
 			atomic_inc(&sent);
 			return 0;
 		}
 
-		if (ret != -ENOMEM && ret != -EAGAIN) {
+		if (ret != -ENOMEM && ret != -EAGAIN &&
+		    ret != -EBUSY && ret != -ENOBUFS) {
 			atomic_inc(&failed);
 			return ret;
 		}

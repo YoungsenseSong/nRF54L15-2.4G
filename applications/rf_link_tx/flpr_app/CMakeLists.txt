@@ -12,6 +12,7 @@ project(flpr_app)
 # NORDIC SDK APP START
 target_sources(app PRIVATE
   src/adc_sampler.c
+  src/fatal_diag.c
   src/ipc_tx.c
   src/main.c
 )
