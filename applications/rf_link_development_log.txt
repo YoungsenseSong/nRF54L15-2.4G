@@ -142,3 +142,142 @@ Result:
 - The current working state is close to a full 16-bit x 50 ksps transport path.
 Next:
 - Capture longer-duration CSV evidence and replace the fake sampler with ADC DMA when the acquisition side is ready.
+
+Detailed Version Notes
+======================
+
+Version focus: v0.5 throughput optimization and bring-up closure
+---------------------------------------------------------------
+
+Goal
+- Carry `16-bit * 50 ksps = 800000 bps` of useful sample payload.
+- Keep the TX architecture as `LP generate -> IPC -> HP queue -> ESB PTX`.
+
+Why v0.4 could not reach the target
+- `v0.4` used `32 samples/frame` and `640 us/frame`.
+- That means each frame carried `32 * 16 = 512` payload bits.
+- The required packet rate was `800000 / 512 = 1562.5 pps`.
+- Measured TX MAC latency was about `1087 us min` and `1574 us avg`, already
+  longer than the requested `640 us` frame period.
+- So the bottleneck was not first a radio-quality problem; it was that the
+  whole send path could not drain frames quickly enough.
+
+Main optimization idea in v0.5
+- Reduce packet rate while keeping the same payload target.
+- Move from `32` to `96` samples per frame:
+  - one frame now carries `96 * 16 = 1536` payload bits
+  - target packet rate becomes `800000 / 1536 = 520.8 pps`
+- Increase air-interface headroom at the same time:
+  - `1 Mbps + ACK` -> `4 Mbps preferred + no-ACK`
+- Reduce software-path overhead:
+  - LP inactive software queue removed from the hot path
+  - LP sends generated frames directly into IPC
+  - HP TX queue depth and ESB payload/FIFO sizes increased
+
+Code-level v0.5 direction
+- Protocol and rate parameters:
+  - `applications/rf_link_tx/src/proto.h`
+  - `applications/rf_link_rx/src/proto.h`
+  - frame payload changed to `96` samples
+  - TX period changed to `1920 us`
+- RF mode changes:
+  - `applications/rf_link_tx/src/radio_link.c`
+  - `applications/rf_link_rx/src/radio_link.c`
+  - ESB changed to `4 Mbps preferred`
+  - payload path changed to `no-ACK`
+- Queue and runtime sizing:
+  - `applications/rf_link_tx/src/tx_queue.c`
+  - `applications/rf_link_tx/prj.conf`
+  - `applications/rf_link_rx/prj.conf`
+  - HP queue depth, ESB max payload, and FIFO sizes increased
+- LP hot-path simplification:
+  - `applications/rf_link_tx/flpr_app/src/main.c`
+  - `applications/rf_link_tx/flpr_app/CMakeLists.txt`
+  - direct frame generation to IPC send path
+
+Why TX once looked dead while RX stayed zero
+- After the v0.5 parameter change, TX initially showed no useful RF progress
+  and RX stayed at `frames=0 samples=0 bps=0`.
+- That symptom looked like a radio failure, but the real issue was inside the
+  IPC path.
+
+Zero-throughput debug logic
+- First question: did LP still generate frames
+  - solved by adding LP shared trace counters
+- Second question: did HP receive IPC frames
+  - solved by adding `ipc_bad_size`, `ipc_bad_magic`, and `ipc_rx`
+- Third question: did frames reach the air
+  - solved by keeping TX `rf_ok/rf_fail/rf_timeout/rf_err`
+- Fourth question: did RX see air traffic but reject frames
+  - solved by adding `rf_evt`, `rf_frames`, and `rf_read_err` on RX
+- Fatal-path visibility:
+  - `applications/rf_link_tx/src/fatal_diag.c`
+  - `applications/rf_link_tx/flpr_app/src/fatal_diag.c`
+  - HP could now print `HP fatal reason=...`
+  - LP could now store fatal counters in shared trace memory
+
+Actual root cause 1: ICMSG send success was interpreted incorrectly
+- File:
+  - `applications/rf_link_tx/flpr_app/src/ipc_tx.c`
+- Problem:
+  - LP treated only return `0` from `ipc_service_send()` as success
+- Reality:
+  - Zephyr ICMSG may return the sent byte count on success
+- Fix:
+  - accept both `0` and `sizeof(frame)` as success
+  - retry `-ENOMEM`, `-EAGAIN`, `-EBUSY`, and `-ENOBUFS`
+
+Actual root cause 2: ICMSG default PBUF RX buffer was too small
+- New wire frame size:
+  - `204 bytes`
+- Zephyr default:
+  - `CONFIG_PBUF_RX_READ_BUF_SIZE=128`
+- Result:
+  - once real 204-byte traffic started, ICMSG asserted internally and TX hit
+    `HP fatal reason=4`
+- Fix:
+  - `applications/rf_link_tx/prj.conf`
+  - `applications/rf_link_tx/flpr_app/prj.conf`
+  - set `CONFIG_PBUF_RX_READ_BUF_SIZE=256`
+  - `applications/rf_link_tx/src/proto.h`
+  - add compile-time assert so future frame growth cannot silently exceed PBUF
+
+Stable intermediate state after IPC/PBUF fixes
+- Example stable excerpt:
+  - `TX stat sent=51857 ipc_rx=51857 queued=51857 q_drop=0 ...`
+  - `RX stat ... bps=774144 lost=0 ...`
+- Meaning:
+  - LP generation, IPC receive, HP queueing, and RF send were all in lockstep
+  - the remaining issue was not corruption or packet loss in the active path
+
+Why there was still a 3 percent gap
+- With `96 samples/frame` and `1920 us` target period:
+  - target packet rate is `520.8 pps`
+- But the stable excerpt gave:
+  - `774144 / 1536 = 504 pps`
+- Reason:
+  - LP used relative `k_sleep(K_USEC(1920))`
+  - real frame period became `processing time + 1920 us`
+
+Final timing fix
+- File:
+  - `applications/rf_link_tx/flpr_app/src/main.c`
+- Change:
+  - use `k_cycle_get_64()` and absolute deadline pacing
+  - every loop targets the next fixed timestamp instead of sleeping a constant
+    delay after work completes
+- Control switch:
+  - `applications/rf_link_tx/src/proto.h`
+  - `RF_LINK_LP_USE_ABSOLUTE_PACING`
+  - set to `0` to return to the old relative pacing without reverting code
+
+Current understanding
+- The final near-800 kbps state was not achieved by only changing PHY and ACK.
+- It required all of the following together:
+  - larger frames
+  - lower packet rate
+  - no-ACK high-rate RF mode
+  - direct LP->IPC hot path
+  - corrected ICMSG send semantics
+  - correct PBUF sizing for 204-byte frames
+  - absolute-deadline pacing on LP

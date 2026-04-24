@@ -110,60 +110,35 @@ Two key operating points have been recorded:
 
 The latest measured 50 ksps test (`v0.4`) shows the old
 `1 Mbps ESB + ACK + 76-byte frame` configuration is throughput-limited. The
-evidence is recorded in:
+full version-by-version optimization path, code-level fix details, and
+zero-throughput debug closure are recorded in:
 
-- `applications/rf_link_experiment_logs/20260419_50ksps_uart_excerpt.txt`
+- `applications/rf_link_development_log.txt`
 - `applications/rf_link_experiment_logs/optimization_attempts.md`
 - `applications/rf_link_experiment_records.md`
 
-## Throughput Optimization Summary
+## Common Communication Parameters
 
-The 50 ksps x 16-bit bring-up was solved by a bundle of changes rather than one
-parameter tweak:
+The project uses these common engineering quantities:
 
-- Raise RF headroom: move from `1 Mbps + ACK` to `4 Mbps preferred + no-ACK`
-  ESB streaming.
-- Reduce packet rate: increase each application frame from `32` to `96`
-  samples, which lowers the required packet rate from `1562.5 pps` to
-  `520.8 pps` for the same `800 kbps` payload target.
-- Reduce software backpressure: increase HP TX queue depth and ESB FIFO sizing,
-  remove the inactive LP software queue from the hot path, and send frames
-  directly from LP generation to IPC.
-- Fix IPC semantics: `applications/rf_link_tx/flpr_app/src/ipc_tx.c` now
-  treats both return `0` and returned byte count as successful
-  `ipc_service_send()` results, and retries `-ENOMEM`, `-EAGAIN`, `-EBUSY`,
-  and `-ENOBUFS`.
-- Match ICMSG buffering to the 204-byte wire frame: both TX cores set
-  `CONFIG_PBUF_RX_READ_BUF_SIZE=256`, and `proto.h` asserts that the PBUF RX
-  buffer is not smaller than the wire frame.
-- Remove pacing drift: LP pacing can use absolute-deadline timing through
-  `RF_LINK_LP_USE_ABSOLUTE_PACING`, so per-frame processing time does not
-  accumulate into the next frame period.
+| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` stable excerpt |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sample_bits` | Bits per sample | fixed | 16 | 16 | 16 | 16 |
+| `samples_per_frame` | Samples in one application frame | fixed by protocol | 32 | 32 | 96 | 96 |
+| `frame_payload_bits` | Useful sample bits in one frame | `samples_per_frame * sample_bits` | 512 | 512 | 1536 | 1536 |
+| `period_us` | Target frame period | fixed by firmware | 10000 us | 640 us | 1920 us | 1920 us |
+| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 504 pps |
+| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | 48384 sps |
+| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | 774144 bps |
 
-## Zero-Throughput Debug Closure
+Notes:
 
-The hardest bring-up issue after the `v0.5` parameter change was a false
-"link dead" state:
-
-- TX first showed LP IPC bound, but `ipc_rx=0` and RX stayed at
-  `frames=0 samples=0 bps=0`.
-- After the first IPC-side fix, TX exposed `HP fatal reason=4` during
-  `ipc_bridge_init()`.
-
-The debug and fix chain was:
-
-- Add HP fatal UART output, LP shared trace memory, and extra TX/RX status
-  fields (`lp_*`, `ipc_bad_*`, `rf_evt/rf_frames/rf_read_err`) so the failure
-  could be isolated to LP generation, HP IPC receive, or RF delivery.
-- Fix `applications/rf_link_tx/flpr_app/src/ipc_tx.c`, where LP previously
-  treated only return `0` as success. On Zephyr ICMSG, success may return the
-  sent byte count, so frames were being generated but not handled correctly.
-- Raise `CONFIG_PBUF_RX_READ_BUF_SIZE` from the default `128` to `256` on both
-  TX cores. The new 204-byte frame was tripping an ICMSG-side assert and
-  causing `K_ERR_KERNEL_OOPS` (`HP fatal reason=4`) as soon as endpoint
-  traffic started.
-- After IPC became stable, close the remaining throughput gap by switching LP
-  pacing from relative `k_sleep(1920 us)` to absolute-deadline pacing.
+- The `v0.5` stable excerpt value `774144 bps` came from RX UART. Since one
+  frame carries `96 * 16 = 1536` payload bits, it corresponds to
+  `774144 / 1536 = 504 pps` and `504 * 96 = 48384 sps`.
+- The current bench state is reported near `800000 bps`; that corresponds to
+  about `520.8 pps` and `50000 sps`. Longer CSV evidence should still be
+  recorded for a final archived number.
 
 ## Build
 
@@ -221,51 +196,53 @@ RX prints:
 RX stat frames=... samples=... bps=... lost=... dup=... bad=... rf_evt=... rf_frames=... rf_read_err=... seq=... first=... last=...
 ```
 
-TX field meanings:
+TX numeric parameter meanings:
 
-| Field | Meaning |
+| UART name | Meaning |
 | --- | --- |
-| `sent` | HP side successfully transmitted frames over ESB. |
-| `ipc_rx` | HP side frames received from LP through IPC. |
-| `queued` | IPC frames accepted into the HP TX queue. |
-| `q_drop` | Frames dropped before RF send because the queue path could not keep up. |
-| `ipc_bad_size` | IPC payload size was not the expected `rf_frame` size. |
-| `ipc_bad_magic` | IPC payload failed frame magic or `sample_count` validation. |
-| `rf_ok` | ESB reported TX success. |
-| `rf_fail` | ESB reported TX failure. |
-| `rf_timeout` | HP timed out waiting for TX completion. |
-| `rf_err` | Local TX-side write/setup error before a packet completed. |
-| `attempts` | Attempt count reported for the latest ESB packet. |
-| `mac_cnt` | Number of packets included in MAC latency statistics. |
-| `mac_last_us` | Latest packet MAC latency in microseconds. |
-| `mac_min_us`, `mac_avg_us`, `mac_max_us` | Minimum, average, and maximum MAC latency. |
-| `lp_stage` | LP state: `0 reset`, `1 boot`, `2 IPC ready`, `3 IPC bound`, `4 run`. |
-| `lp_boots` | Historical LP boot counter stored in shared trace memory. |
-| `lp_fatal` | Historical LP fatal counter stored in shared trace memory. |
-| `lp_fatal_reason` | Last recorded LP fatal reason. |
-| `lp_loop` | LP main loop iterations. |
-| `lp_seq` | Latest LP-generated frame sequence. |
-| `lp_ok` | LP frames successfully sent into IPC. |
-| `lp_busy` | LP IPC send retries due to busy/full conditions. |
-| `lp_fail` | LP IPC send failures after retries. |
-| `lp_ret` | Last LP IPC send return value. |
+| `TX stat sent` | HP side successfully transmitted frames over ESB. |
+| `TX stat ipc_rx` | HP side frames received from LP through IPC. |
+| `TX stat queued` | IPC frames accepted into the HP TX queue. |
+| `TX stat q_drop` | Frames dropped before RF send because the queue path could not keep up. |
+| `TX stat ipc_bad_size` | IPC payload size was not the expected `rf_frame` size. |
+| `TX stat ipc_bad_magic` | IPC payload failed frame validation. |
+| `TX stat rf_ok` | ESB reported TX success. |
+| `TX stat rf_fail` | ESB reported TX failure. |
+| `TX stat rf_timeout` | HP timed out waiting for TX completion. |
+| `TX stat rf_err` | Local TX-side write/setup error before a packet completed. |
+| `TX stat attempts` | Attempt count reported for the latest ESB packet. |
+| `TX stat mac_cnt` | Number of packets included in MAC latency statistics. |
+| `TX stat mac_last_us` | Latest packet MAC latency in microseconds. |
+| `TX stat mac_min_us` | Minimum recorded MAC latency in microseconds. |
+| `TX stat mac_avg_us` | Average MAC latency in microseconds. |
+| `TX stat mac_max_us` | Maximum recorded MAC latency in microseconds. |
+| `TX stat lp_stage` | LP state: `0 reset`, `1 boot`, `2 IPC ready`, `3 IPC bound`, `4 run`. |
+| `TX stat lp_boots` | Historical LP boot counter stored in shared trace memory. |
+| `TX stat lp_fatal` | Historical LP fatal counter stored in shared trace memory. |
+| `TX stat lp_fatal_reason` | Last recorded LP fatal reason. |
+| `TX stat lp_loop` | LP main loop iterations. |
+| `TX stat lp_seq` | Latest LP-generated frame sequence. |
+| `TX stat lp_ok` | LP frames successfully sent into IPC. |
+| `TX stat lp_busy` | LP IPC send retries due to busy/full conditions. |
+| `TX stat lp_fail` | LP IPC send failures after retries. |
+| `TX stat lp_ret` | Last LP IPC send return value. |
 
-RX field meanings:
+RX numeric parameter meanings:
 
-| Field | Meaning |
+| UART name | Meaning |
 | --- | --- |
-| `frames` | Frames accepted by RX application logic after basic validation. |
-| `samples` | Total accepted samples. |
-| `bps` | Effective payload bit rate calculated from accepted sample bytes, not air-interface bitrate. |
-| `lost` | Sequence-gap based lost-frame counter. |
-| `dup` | Duplicate or old-sequence frame counter. |
-| `bad` | Invalid frame counter (`bad_magic + bad_size`). |
-| `rf_evt` | Number of ESB RX events seen by the radio callback. |
-| `rf_frames` | Number of payloads read from the ESB RX FIFO. |
-| `rf_read_err` | Unexpected RX event/read-side error count. |
-| `seq` | Latest accepted frame sequence. |
-| `first` | First sample value of the latest accepted frame. |
-| `last` | Last sample value of the latest accepted frame. |
+| `RX stat frames` | Frames accepted by RX application logic after basic validation. |
+| `RX stat samples` | Total accepted samples. |
+| `RX stat bps` | Effective payload bitrate calculated from accepted sample bytes, not air-interface bitrate. |
+| `RX stat lost` | Sequence-gap based lost-frame counter. |
+| `RX stat dup` | Duplicate or old-sequence frame counter. |
+| `RX stat bad` | Invalid frame counter (`bad_magic + bad_size`). |
+| `RX stat rf_evt` | Number of ESB RX events seen by the radio callback. |
+| `RX stat rf_frames` | Number of payloads read from the ESB RX FIFO. |
+| `RX stat rf_read_err` | Unexpected RX event/read-side error count. |
+| `RX stat seq` | Latest accepted frame sequence. |
+| `RX stat first` | First sample value of the latest accepted frame. |
+| `RX stat last` | Last sample value of the latest accepted frame. |
 
 These fields are intended for throughput and stability measurement. Raw sample
 arrays are intentionally not printed on UART so the serial port does not become
