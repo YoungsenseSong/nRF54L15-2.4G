@@ -9,6 +9,8 @@ nRF54L15 Connect Kit.
 - `rf_link_rx`: receiver, built as a single-core `cpuapp` application.
 - `save_serial_csv.py`: PC-side serial parser that stores TX/RX status lines as
   CSV without requiring raw sample data on the UART.
+- `export_fake_adc_csv.py`: host-side exporter for the current TX fake ADC
+  source pattern.
 
 ## Current Architecture
 
@@ -63,24 +65,24 @@ target. Detailed version-specific optimization rationale is recorded in
 
 ## Common Communication Parameters
 
-| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` stable excerpt |
+| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` current measured |
 | --- | --- | --- | --- | --- | --- | --- |
 | `sample_bits` | Bits per sample | fixed | 16 | 16 | 16 | 16 |
 | `samples_per_frame` | Samples in one application frame | fixed by protocol | 32 | 32 | 96 | 96 |
 | `frame_payload_bits` | Useful sample bits in one frame | `samples_per_frame * sample_bits` | 512 | 512 | 1536 | 1536 |
 | `period_us` | Target frame period | fixed by firmware | 10000 us | 640 us | 1920 us | 1920 us |
-| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 504 pps |
-| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | 48384 sps |
-| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | 774144 bps |
+| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 521 pps |
+| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | about 50016 sps |
+| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | about 800256 bps |
 
 Notes:
 
-- The `v0.5` stable excerpt value `774144 bps` came from RX UART. Since one
-  frame carries `96 * 16 = 1536` payload bits, it corresponds to
+- The `774144 bps` value is a `2026-04-24` intermediate stable excerpt captured
+  before LP absolute-deadline pacing. It corresponds to
   `774144 / 1536 = 504 pps` and `504 * 96 = 48384 sps`.
-- The current bench state is reported near `800000 bps`; that corresponds to
-  about `520.8 pps` and `50000 sps`. Longer CSV evidence should still be
-  recorded for a final archived number.
+- The current reported working state after deadline pacing is
+  `800256 bps`, which corresponds to `800256 / 1536 = 521 pps` and
+  `521 * 96 = 50016 sps`.
 
 ## Build
 
@@ -177,7 +179,23 @@ payloads.
 ```powershell
 python .\save_serial_csv.py --list-ports
 python .\save_serial_csv.py --port COM7 --output rx_stats.csv
-python .\save_serial_csv.py --port COM8 --output tx_stats.csv
+python .\save_serial_csv.py --port COM11 --output tx_stats.csv
 ```
 
 Use two terminals if TX and RX should be captured at the same time.
+
+`save_serial_csv.py` saves UART application statistics only. It does not save
+per-sample payload arrays because the current firmware does not print raw
+samples on UART.
+
+If you need a CSV of the current TX-side fake source pattern without changing
+firmware, use:
+
+```powershell
+python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results"
+```
+
+That command exports the deterministic fake-ADC pattern from
+`rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured samples.
+Actual received sample export would require firmware to emit raw frame data
+over UART or another host-visible interface.

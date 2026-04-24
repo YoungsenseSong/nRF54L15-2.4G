@@ -34,6 +34,7 @@ application, experiment records, and current performance findings.
 | `applications/rf_link_parameter_matrix.csv` | Version/parameter comparison table. |
 | `applications/rf_link_tag_notes/` | Five-line notes for each project tag. |
 | `save_serial_csv.py` | PC-side UART statistics to CSV capture tool. |
+| `export_fake_adc_csv.py` | Host-side exporter for the current TX fake-ADC sample pattern. |
 
 ## Current Architecture
 
@@ -106,7 +107,7 @@ Two key operating points have been recorded:
 | --- | --- | --- |
 | `v0.3-rf-link-docs-devlog` baseline notes | 16-bit 50 kbps-class link | 32 samples every 10 ms, about 51.2 kbps payload target. |
 | `v0.4-50ksps-load-test` | 50 ksps x 16-bit, 800 kbps payload | RX observed about 286 to 306 kbps with high sequence loss and TX queue drops. |
-| `v0.5-rf-throughput-optimization` | Increase RF headroom for 50 ksps | 4 Mbps/no-ACK/96-sample frame firmware builds completed. After IPC/PBUF fixes the bench reached about 774 kbps with zero-drop excerpts, and after LP absolute-deadline pacing the current working state is reported stable near the 800 kbps payload target. |
+| `v0.5-rf-throughput-optimization` | Increase RF headroom for 50 ksps | 4 Mbps/no-ACK/96-sample frame firmware builds completed. The 2026-04-24 intermediate stable excerpt before deadline pacing reached `774144 bps`, and the current working state after deadline pacing reaches about `800256 bps` or about `50016 sps`. |
 
 The latest measured 50 ksps test (`v0.4`) shows the old
 `1 Mbps ESB + ACK + 76-byte frame` configuration is throughput-limited. The
@@ -121,24 +122,24 @@ zero-throughput debug closure are recorded in:
 
 The project uses these common engineering quantities:
 
-| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` stable excerpt |
+| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` current measured |
 | --- | --- | --- | --- | --- | --- | --- |
 | `sample_bits` | Bits per sample | fixed | 16 | 16 | 16 | 16 |
 | `samples_per_frame` | Samples in one application frame | fixed by protocol | 32 | 32 | 96 | 96 |
 | `frame_payload_bits` | Useful sample bits in one frame | `samples_per_frame * sample_bits` | 512 | 512 | 1536 | 1536 |
 | `period_us` | Target frame period | fixed by firmware | 10000 us | 640 us | 1920 us | 1920 us |
-| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 504 pps |
-| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | 48384 sps |
-| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | 774144 bps |
+| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 521 pps |
+| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | about 50016 sps |
+| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | about 800256 bps |
 
 Notes:
 
-- The `v0.5` stable excerpt value `774144 bps` came from RX UART. Since one
-  frame carries `96 * 16 = 1536` payload bits, it corresponds to
+- The `774144 bps` value is a `2026-04-24` intermediate stable excerpt captured
+  before LP absolute-deadline pacing. It corresponds to
   `774144 / 1536 = 504 pps` and `504 * 96 = 48384 sps`.
-- The current bench state is reported near `800000 bps`; that corresponds to
-  about `520.8 pps` and `50000 sps`. Longer CSV evidence should still be
-  recorded for a final archived number.
+- The current reported working state after deadline pacing is
+  `800256 bps`, which corresponds to `800256 / 1536 = 521 pps` and
+  `521 * 96 = 50016 sps`.
 
 ## Build
 
@@ -253,8 +254,24 @@ Use the CSV capture tool:
 ```powershell
 python .\save_serial_csv.py --list-ports
 python .\save_serial_csv.py --port COM7 --output rx_stats.csv
-python .\save_serial_csv.py --port COM8 --output tx_stats.csv
+python .\save_serial_csv.py --port COM11 --output tx_stats.csv
 ```
+
+`save_serial_csv.py` saves UART application statistics only. It does not save
+per-sample payload arrays because the current firmware does not print raw
+samples on UART.
+
+If you need a CSV of the current TX-side fake data source without changing
+firmware, use:
+
+```powershell
+python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results"
+```
+
+That command exports the deterministic fake-ADC pattern from
+`applications/rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured
+samples. Actual received sample export would require firmware to emit raw frame
+data over UART or another host-visible interface.
 
 ## Milestone Tags
 
