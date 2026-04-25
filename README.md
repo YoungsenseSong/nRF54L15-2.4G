@@ -1,5 +1,7 @@
 # nRF54L15 Private 2.4G Wireless Data Link
 
+基于 nRF54L15 Connect Kit 的私有 2.4GHz 无线数据链路工程。发送端采用 `cpuapp + cpuflpr` 双核结构，LP 核生成 16bit 采样帧并通过 IPC 交给 HP 核，HP 核基于 Nordic ESB 完成无线发送；接收端采用单核结构，负责接收数据帧、统计吞吐率、丢包、重复包和链路延时，并支持通过串口导出 CSV 实验数据。
+
 This repository is a private 2.4 GHz wireless data-link project based on the
 nRF54L15 Connect Kit. The current implementation focuses on a point-to-point
 16-bit sample transport path using Nordic ESB, with a dual-core transmitter and

@@ -34,3 +34,97 @@ applications/
     │   └── debug_uart.c             # 向PC输出统计
     └── boards/
         └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
+
+0. 公共准备命令
+
+如果你还没拉仓库：
+
+cd D:\nRF54L15\NCS-Project
+
+git clone https://github.com/YoungsenseSong/nRF54L15-2.4G.git nrf54l15-connectkit
+cd .\nrf54l15-connectkit
+
+git checkout codex/rf-link-2p4g-devlog
+git pull
+
+如果你本地已经有仓库：
+
+cd D:\nRF54L15\NCS-Project
+.\.venv\Scripts\Activate.ps1
+
+cd D:\nRF54L15\NCS-Project\nrf54l15-connectkit
+
+git checkout codex/rf-link-2p4g-devlog
+git pull
+
+查看两块板子的 pyOCD 序列号：
+
+pyocd list
+
+下面命令里我用：
+
+<TX_ID>
+<RX_ID>
+
+表示你需要替换成 pyocd list 看到的实际序列号
+
+方案一：普通串口应用信息 / 统计版
+
+编译：
+west build -p always `
+  -d build_rf_link_tx `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp `
+  applications\rf_link_tx
+  
+west build -p always `
+  -d build_rf_link_rx `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp `
+  applications\rf_link_rx
+
+
+烧录：
+pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\rf_link_tx\zephyr\zephyr.hex
+pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
+pyocd load -u 820D9A5F0F3BA22B8E4ES -t nrf54l build_rf_link_rx\rf_link_rx\zephyr\zephyr.hex
+
+方案二：RX 样本流版 / 真实样本导出版
+
+编译：
+west build -p always `
+  -d build_rf_link_tx `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp `
+  applications\rf_link_tx
+
+west build -p always `
+  -d build_rf_link_rx_stream `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp `
+  applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=stream.conf"
+
+烧录：
+
+pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\rf_link_tx\zephyr\zephyr.hex
+pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
+pyocd load -u 820D9A5F0F3BA22B8E4ES -t nrf54l build_rf_link_rx_stream\rf_link_rx\zephyr\zephyr.hex
+
+默认抓取：
+
+python .\dump_rx_frames.py --port COM7
+
+抓固定帧数并指定输出文件：
+
+python .\dump_rx_frames.py `
+  --port COM7 `
+  --max-frames 1000 `
+  --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
+
+
+Codex 对话里说明，dump_rx_frames.py 默认会把 CSV 保存到：
+
+D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results
+
+在 rx_sample_stream.c (line 1) / rx_sample_stream.h (line 1) 里加了一个默认关闭的 RX 二进制导出模块
+接在 rx_reorder.c (line 73) 的“已验收帧”后面；默认 build_rf_link_rx 还是你现在的稳定统计版，不会改链路结构。
+只有用 stream.conf (line 1) 重新编译 RX 时，才会切到 COM7 @ 2000000 的二进制流模式，并停止输出 RX stat ... 文本。
+PC 侧新增了 dump_rx_frames.py (line 1)，它会把真实接收帧保存成一帧一行的 CSV
+列里带 stream_drop_total、rf_seq、sample_0 到 sample_95。

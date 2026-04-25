@@ -45,7 +45,6 @@ my_app/
 
 单核编译
 west build -p always -d build_my_app -b nrf54l15_connectkit/nrf54l15/cpuapp .\applications\my_app
-west build -p always -d build_my_app -b nrf54l15_connectkit/nrf54l15/cpuapp .\applications\rf_link_rx
 
 这里的含义是：
 
@@ -60,7 +59,6 @@ west build -p always -d build_my_app -b nrf54l15_connectkit/nrf54l15/cpuapp .\ap
 单核烧录
 west flash -d build_my_app
 （很多场景下等价于pyocd load -t nrf54l <firmware.hex>）
-west flash -d build_rf_link_rx
 
 C.双核开发
 本质，一个 HP 主应用，一个 LP 子应用，由 sysbuild 组合成一套多镜像工程
@@ -97,7 +95,6 @@ flpr_app/boards/...cpuflpr.overlay：FLPR 的 DTS 补充配置
 
 编译
 west build -p always --sysbuild -d build_dual -b nrf54l15_connectkit/nrf54l15/cpuapp applications\dual_ipc_app
-west build -p always --sysbuild -d build_dual -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
 
 这里多出来的核心参数是：--sysbuild
 意思就是：

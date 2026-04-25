@@ -7,7 +7,7 @@
 #include <zephyr/kernel.h>
 
 #define RF_LINK_LP_TRACE_MAGIC   0x4c505452u
-#define RF_LINK_LP_TRACE_VERSION 1u
+#define RF_LINK_LP_TRACE_VERSION 1u             //默认是 deadline 模式，要改回相对 k_sleep() 版本置0
 
 #define RF_LINK_LP_TRACE_NODE DT_NODELABEL(rf_link_lp_trace_mem)
 
