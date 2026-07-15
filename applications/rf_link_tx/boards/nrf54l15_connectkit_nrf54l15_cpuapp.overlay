@@ -29,6 +29,15 @@
 			rf_link_lp_trace_mem: memory@20020800 {
 				reg = <0x20020800 0x0100>;
 			};
+
+			/* Ping-pong MEMS batches written by FLPR and read by CPUAPP. */
+			rf_link_mems_slot0: memory@20021000 {
+				reg = <0x20021000 0x2100>;
+			};
+
+			rf_link_mems_slot1: memory@20023100 {
+				reg = <0x20023100 0x2100>;
+			};
 		};
 
 		/* FLPR execution SRAM */
@@ -71,6 +80,11 @@
 
 &cpuapp_vevif_tx {
 	status = "okay";
+};
+
+/* SPIM00 is owned by FLPR while it acquires IIM-42352 samples. */
+&spi00 {
+	status = "disabled";
 };
 
 &uart30 {

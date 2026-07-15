@@ -216,3 +216,26 @@ seq,count,s0,s1,s2,...,s15
 2,16,32,33,34,...,47
 这意味着你现在已经拥有一个非常实用的数据导出链路：
 LP 生成数据 → HP 收包 → PC 直接拿 CSV
+
+
+九、IIM-42352 + 4096 样本 + 私有 2.4G 整合版（2026-07）
+
+前面的 16 样本/CSV 链路是早期双核 IPC 验证方法。当前 rf_link_tx 已升级为：
+
+IIM-42352 → FLPR SPI/FIFO 连续采集 → 共享 SRAM 双缓冲（每槽 4096 个 int16）→ ICMsg 小描述符唤醒 CPUAPP → CPUAPP 校验 CRC32 → 沿用 ESB 2.4G 链路分片发送
+
+CPUAPP 的“睡眠”是主线程阻塞后的 System ON idle，不是 System OFF；VEVIF mailbox 中断负责唤醒。
+
+新 TX 编译：
+west build -p always --sysbuild -d build_rf_link_tx_mems -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
+
+新 RX 编译：
+west build -p always -d build_rf_link_rx_mems -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
+
+TX 仍需分别烧录：
+build_rf_link_tx_mems\rf_link_tx\zephyr\zephyr.hex
+build_rf_link_tx_mems\flpr_app\zephyr\zephyr.hex
+
+完整接线、冲突报告、串口字段和接板测试步骤见：
+applications\rf_link_INTEGRATION_REPORT.md
+applications\2.4g指南.txt

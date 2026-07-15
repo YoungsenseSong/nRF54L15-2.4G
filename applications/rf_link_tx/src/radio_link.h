@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <zephyr/kernel.h>
 
-#include "proto.h"
+#include "rf_link_proto.h"
 
 struct radio_link_stats {
 	uint32_t tx_ok;

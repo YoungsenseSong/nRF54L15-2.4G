@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "proto.h"
+#include "rf_link_proto.h"
 
 #define RF_LINK_RX_STREAM_MAGIC   0x31535852u
 #define RF_LINK_RX_STREAM_VERSION 1u

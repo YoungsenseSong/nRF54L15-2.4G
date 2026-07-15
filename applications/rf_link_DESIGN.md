@@ -1,125 +1,111 @@
 # RF Link Design Notes
 
-## Goals
+## Design goals
 
-1. Build a private 2.4 GHz point-to-point link on nRF54L15.
-2. Keep the TX side compatible with the planned dual-core acquisition design.
-3. Keep RX simple and single-core for first-stage link validation.
-4. Export useful engineering statistics without printing raw samples.
+1. Keep the main repository's proven ESB frame and RX implementation.
+2. Run continuous IIM-42352 acquisition on FLPR.
+3. Let CPUAPP block in System ON idle until 4096 samples are ready.
+4. Transfer bulk data by shared-memory ownership, not by copying 8 KB through
+   ICMsg.
+5. Make buffer overruns, cache coherency failures, sensor faults, and RF loss
+   visible in bounded status counters.
 
-## Design Split
+## Core split
 
-### TX HP core: `applications/rf_link_tx/src`
+### TX FLPR
 
-- `main.c`
-  - Initializes debug UART, TX queue, ESB radio, and IPC bridge.
-  - Pulls validated frames from `tx_queue`.
-  - Sends each frame through `radio_link_send_frame()`.
-  - Prints TX status once per configured status period.
-- `proto.h`
-  - Defines the fixed 204-byte `rf_frame`.
-  - Defines the common channel, magic value, sample count, TX period, status
-    period, and no-ACK streaming flag.
-- `radio_link.c`
-  - Starts the radio clock domain.
-  - Configures ESB in PTX mode.
-  - Uses 4 Mbps PHY on nRF54L15 when available, with a 2 Mbps fallback.
-  - Uses channel 40, 16-bit CRC, selective ACK support, and no-ACK payloads.
-  - Measures MAC send latency from `esb_write_payload()` to the ESB completion
-    event or timeout.
-  - Tracks min/avg/max/last latency in microseconds.
-- `ipc_bridge.c`
-  - Opens `ipc0` using `ipc_service` and `icmsg`.
-  - Receives LP frames, validates size and magic, and submits valid frames to
-    the TX queue.
-- `tx_queue.c`
-  - Provides a fixed-depth message queue for RF frames.
-  - Drops the oldest frame when the queue is full so the link favors newer data.
-  - Uses a larger HP queue for the high-rate 50 ksps test path.
-- `debug_uart.c`
-  - Uses `uart_poll_out()` directly on `uart30`.
-  - Avoids relying on Zephyr console/printk in dual-core mode.
+- Owns SPIM00 and the IIM-42352 INT1 GPIO.
+- Configures Packet 1 FIFO at 4 kHz per axis and a 1024-byte watermark.
+- Uses a GPIO ISR only to signal a semaphore; all SPI work runs in the FLPR
+  main thread.
+- Reads the latched FIFO count in the datasheet-required low-byte/high-byte
+  order and drains the complete FIFO in one burst.
+- Accumulates XYZ-interleaved `int16_t` values into one of two 4096-sample
+  shared slots.
+- Computes CRC32, applies a memory barrier, and sends a small batch-ready ICMsg
+  descriptor.
+- Does not reuse the slot until CPUAPP sends the matching batch-release
+  descriptor.
 
-### TX LP core: `applications/rf_link_tx/flpr_app/src`
+### TX CPUAPP
 
-- `main.c`
-  - Initializes fake sampler and IPC TX endpoint.
-  - Generates one 96-sample frame per 1920 us period.
-  - Sends each generated frame directly to HP over IPC to avoid an extra LP
-    software queue in the high-rate path.
-- `adc_sampler.c`
-  - Generates deterministic fake 12-bit ramp samples.
-  - Fills `rf_frame` with magic, sequence, count, flags, timestamp, and samples.
-  - Intended replacement point for real ADC acquisition.
-- `sample_buffer.c`
-  - Kept as a local helper for future producer/consumer experiments.
-  - Not built into the current high-rate FLPR image.
-- `ipc_tx.c`
-  - Opens `ipc0`, registers endpoint, waits for HP bind.
-  - Sends full `rf_frame` payloads to HP.
+- Initializes ICMsg and blocks indefinitely on the batch message queue.
+- Is awakened by the VEVIF mailbox interrupt when FLPR publishes a descriptor.
+- Invalidates its data cache for the shared slot and validates slot metadata
+  plus CRC32.
+- Lazily initializes ESB when the first valid batch arrives.
+- Converts a batch into 43 fixed-size RF frames while preserving the main
+  repository's channel, address, PHY, CRC, and no-ACK behavior.
+- Releases the slot to FLPR even when validation or radio transmission fails,
+  preventing permanent buffer ownership leaks.
 
-### RX single-core: `applications/rf_link_rx/src`
+### RX CPUAPP
 
-- `main.c`
-  - Starts UART, RX statistics, and ESB PRX.
-  - Prints one status line per second.
-- `radio_link.c`
-  - Starts radio clock.
-  - Configures ESB PRX with matching address/channel/PHY and no-ACK payload
-    behavior.
-  - Reads every ESB payload and passes it to `rx_reorder_process_frame()`.
-- `rx_reorder.c`
-  - Validates frame size, magic, and sample count.
-  - Tracks received frames, samples, bytes, sequence loss, duplicates, bad
-    frames, and latest first/last sample.
-- `debug_uart.c`
-  - Uses direct UART polling output.
+- Keeps the existing single-core ESB PRX path.
+- Validates fixed wire size, magic, and variable `sample_count` from 1 to 96.
+- Uses RF sequence gaps to count lost frames.
+- Supports either one-second text statistics or the optional binary frame
+  stream used by `dump_rx_frames.py`.
 
-## Current Performance Finding
+## Shared-memory ownership protocol
 
-The current 50 ksps optimization build is configured by setting:
+Each shared slot has exactly one owner:
 
 ```text
-96 samples/frame, one frame every 1920 us
+free -> FLPR filling -> ready message -> CPUAPP reading/sending
+     -> release message -> free
 ```
 
-This equals:
+The ready/release message contains protocol magic/version, message type, slot
+index, batch sequence, sample count, and sample CRC32. A release is accepted by
+FLPR only when both slot index and batch sequence match the in-flight slot.
+Duplicate or stale releases are rejected and counted.
 
-```text
-96 / 0.00192 = 50000 samples/s
-50000 * 16 = 800000 bit/s
-```
+Two slots allow FLPR to acquire the next batch while CPUAPP transmits the
+previous one. If both slots are busy, FLPR blocks instead of overwriting data;
+`lp_slot_wait` exposes this condition. The IIM FIFO can then overflow, which is
+reported as `lp_fifo_ovf`.
 
-Measured `v0.4` logs with ESB 1 Mbps + ACK showed:
+## Cache and memory ordering
 
-- RX effective payload rate: about 286 to 306 kbps.
-- RX sequence loss increases rapidly.
-- TX `q_drop` increases rapidly.
-- TX `rf_fail` remains low, so the limiting factor is throughput rather than
-  frame corruption.
-- TX MAC latency min is about 1087 us and average about 1574 us, which is
-  longer than the requested 640 us frame period.
+- FLPR has no enabled data cache in this build and writes the shared SRAM
+  directly.
+- FLPR finishes the slot and executes a full data-memory barrier before the
+  ready descriptor is sent.
+- CPUAPP invalidates the full cache-line-aligned slot after receiving the
+  descriptor, then executes a full barrier before reading metadata or samples.
+- Slot addresses and sizes are compile-time checked against the devicetree.
 
-The `v0.5` build changes the bottleneck assumptions:
+## IIM-42352 details
 
-- PHY is raised to 4 Mbps on nRF54L15.
-- Payload data uses ESB no-ACK to remove ACK turnaround from the streaming path.
-- Frame size is raised to 204 bytes so the packet rate drops from 1562.5 pps to
-  about 520.8 pps for the same 50 ksps payload.
-- HP TX queue is raised from 16 to 64 frames.
-- UART status printing is time-based at 1000 ms, not packet-count based.
-- FLPR sends generated frames directly over IPC with a 200 us IPC send timeout.
+- SPI mode 3, 8 MHz.
+- Packet 1, 8 bytes: header, X, Y, Z, temperature.
+- Regular-resolution header check: `(header & 0xFC) == 0x40`.
+- FIFO count in bytes (`FIFO_COUNT_REC=0`).
+- 1024-byte watermark, repeated threshold events enabled.
+- Stream-to-FIFO mode.
+- Low-noise accelerometer, 4 kHz ODR, +/-16 g.
+- 8 us INT1 pulse, required by the datasheet for ODR >= 4 kHz.
+- A 100 ms FIFO polling fallback prevents a missed GPIO edge from deadlocking
+  acquisition.
 
-The expected full-rate RX payload is still 800 kbps. Whether `lost` and `q_drop`
-remain acceptable must be measured on hardware and recorded as EXP-001.
+## RF protocol compatibility
 
-## Next Engineering Options
+The RF wire size stays 204 bytes. A MEMS batch only changes these semantics:
 
-To reach 50 ksps reliably, the next changes should be evaluated after the
-`v0.5` hardware run:
+- `sample_count` is 96 for normal batch frames and 64 for the final frame.
+- `RF_LINK_FRAME_FLAGS_MEMS` identifies real MEMS samples.
+- `RF_LINK_FRAME_FLAGS_BATCH_START` marks the first frame.
+- `RF_LINK_FRAME_FLAGS_BATCH_END` marks the 43rd frame.
+- Frame sequence remains continuous across batch boundaries.
 
-1. Compare 4 Mbps no-ACK with 2 Mbps no-ACK for range and loss.
-2. Add a low-rate control/heartbeat frame if batch ACK is needed.
-3. Tune frame sample count if 204-byte payloads prove too fragile over distance.
-4. Add GPIO timing probes for hardware latency measurement.
-5. Replace fake sampler with ADC DMA only after the RF path has enough margin.
+The RX source did not require a radio-path redesign. TX and RX include one
+shared protocol header to prevent future frame-definition drift.
+
+## Validation boundary
+
+Both TX images and the RX image build successfully with NCS 3.1.0 without
+attached hardware. Hardware validation is still required for pin wiring,
+WHO_AM_I, FIFO interrupt capture, sustained radio loss, and measured power.
+See `rf_link_INTEGRATION_REPORT.md` for the test procedure and acceptance
+criteria.

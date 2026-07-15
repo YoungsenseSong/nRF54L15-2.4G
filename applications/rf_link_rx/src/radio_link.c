@@ -11,7 +11,7 @@
 #include <nrf.h>
 #include <nrf_erratas.h>
 
-#include "proto.h"
+#include "rf_link_proto.h"
 #include "rx_reorder.h"
 
 #if defined(CONFIG_CLOCK_CONTROL_NRF2)

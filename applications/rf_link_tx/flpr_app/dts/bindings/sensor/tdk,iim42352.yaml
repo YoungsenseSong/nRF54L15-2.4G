@@ -1,0 +1,11 @@
+description: TDK InvenSense IIM-42352 three-axis accelerometer
+
+compatible: "tdk,iim42352"
+
+include: spi-device.yaml
+
+properties:
+  int1-gpios:
+    type: phandle-array
+    required: true
+    description: Active-low FIFO watermark interrupt output

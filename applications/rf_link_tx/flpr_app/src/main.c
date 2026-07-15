@@ -1,88 +1,119 @@
+#include <stdint.h>
+#if defined(CONFIG_CACHE_MANAGEMENT)
+#include <zephyr/cache.h>
+#endif
 #include <zephyr/kernel.h>
+#include <zephyr/sys/barrier.h>
+#include <zephyr/sys/crc.h>
 
 #include "adc_sampler.h"
 #include "ipc_tx.h"
 #include "lp_trace.h"
-#include "proto.h"
+#include "mems_batch.h"
 
-static uint64_t lp_now_us(void)
+#define BATCH_IPC_TIMEOUT_MS 20u
+
+static void update_lp_trace(int last_ret)
 {
-	return k_cyc_to_us_floor64(k_cycle_get_64());
-}
+	struct adc_sampler_stats sensor_stats;
+	struct ipc_tx_stats ipc_stats;
 
-static void lp_wait_next_period(uint64_t *next_deadline_us)
-{
-#if RF_LINK_LP_USE_ABSOLUTE_PACING
-	uint64_t now_us;
-	uint64_t periods_late;
-	int64_t sleep_us;
-
-	if (next_deadline_us == NULL) {
-		return;
-	}
-
-	*next_deadline_us += RF_LINK_TX_PERIOD_US;
-	now_us = lp_now_us();
-	if (now_us > *next_deadline_us) {
-		periods_late = (now_us - *next_deadline_us) / RF_LINK_TX_PERIOD_US;
-		*next_deadline_us += periods_late * RF_LINK_TX_PERIOD_US;
-	}
-
-	sleep_us = (int64_t)(*next_deadline_us - now_us);
-	if (sleep_us > 0) {
-		k_sleep(K_USEC((uint32_t)sleep_us));
-	}
-#else
-	ARG_UNUSED(next_deadline_us);
-	k_sleep(K_USEC(RF_LINK_TX_PERIOD_US));
-#endif
+	adc_sampler_stats_get(&sensor_stats);
+	ipc_tx_stats_get(&ipc_stats);
+	rf_link_lp_trace_note_sensor(sensor_stats.irq_count,
+				 sensor_stats.poll_fallbacks,
+				 sensor_stats.fifo_packets,
+				 sensor_stats.samples_captured,
+				 sensor_stats.malformed_packets,
+				 sensor_stats.spi_errors,
+				 sensor_stats.fifo_overflows);
+	rf_link_lp_trace_note_ipc(ipc_stats.sent, ipc_stats.busy,
+				  ipc_stats.failed, ipc_stats.released,
+				  ipc_stats.bad_release, ipc_stats.slot_waits,
+				  last_ret);
 }
 
 int main(void)
 {
-	struct rf_frame frame;
-	struct ipc_tx_stats ipc_stats;
-	uint64_t next_deadline_us;
+	uint32_t batch_seq = 0u;
 	int ret;
 
 	rf_link_lp_trace_boot();
-	adc_sampler_init();
 
 	ret = ipc_tx_init();
 	if (ret != 0) {
-		rf_link_lp_trace_note_ipc(0u, 0u, 1u, ret);
+		rf_link_lp_trace_note_fatal((uint32_t)-ret);
 		return ret;
 	}
 	rf_link_lp_trace_set_stage(RF_LINK_LP_STAGE_IPC_READY);
 
 	ret = ipc_tx_wait_bound(K_FOREVER);
 	if (ret != 0) {
-		rf_link_lp_trace_note_ipc(0u, 0u, 1u, ret);
+		rf_link_lp_trace_note_fatal((uint32_t)-ret);
 		return ret;
 	}
 	rf_link_lp_trace_set_stage(RF_LINK_LP_STAGE_IPC_BOUND);
 
-	if (RF_LINK_LP_START_DELAY_MS > 0u) {
-		k_sleep(K_MSEC(RF_LINK_LP_START_DELAY_MS));
+	ret = adc_sampler_init();
+	if (ret != 0) {
+		update_lp_trace(ret);
+		rf_link_lp_trace_note_fatal((uint32_t)-ret);
+		return ret;
 	}
-	next_deadline_us = lp_now_us();
+	rf_link_lp_trace_set_stage(RF_LINK_LP_STAGE_SENSOR_READY);
 
 	while (1) {
-		static uint32_t warmup_frames;
+		volatile struct rf_link_mems_batch *shared_batch;
+		int16_t *samples;
+		uint32_t slot_index;
+		uint32_t crc;
 
-		adc_sampler_fill_frame(&frame);
-		rf_link_lp_trace_note_loop(frame.seq);
-		ret = ipc_tx_send_frame(&frame, K_MSEC(RF_LINK_LP_IPC_SEND_TIMEOUT_MS));
-		ipc_tx_stats_get(&ipc_stats);
-		rf_link_lp_trace_note_ipc(ipc_stats.sent, ipc_stats.busy,
-					  ipc_stats.failed, ret);
+		ret = ipc_tx_acquire_slot(&slot_index, K_FOREVER);
+		if (ret != 0) {
+			update_lp_trace(ret);
+			continue;
+		}
 
-		if (warmup_frames < RF_LINK_LP_WARMUP_FRAMES) {
-			warmup_frames++;
-			k_sleep(K_MSEC(RF_LINK_LP_WARMUP_PERIOD_MS));
-			next_deadline_us = lp_now_us();
-		} else {
-			lp_wait_next_period(&next_deadline_us);
+		shared_batch = rf_link_mems_batch_slot(slot_index);
+		if (shared_batch == NULL) {
+			rf_link_lp_trace_note_fatal(0x100u);
+			return -EINVAL;
+		}
+
+		shared_batch->magic = RF_LINK_MEMS_BATCH_MAGIC;
+		shared_batch->version = RF_LINK_MEMS_BATCH_VERSION;
+		shared_batch->slot_index = slot_index;
+		shared_batch->batch_seq = batch_seq;
+		shared_batch->sample_count = RF_LINK_MEMS_BATCH_SAMPLE_COUNT;
+		shared_batch->capture_start_ms = k_uptime_get_32();
+		rf_link_lp_trace_note_loop(batch_seq);
+
+		samples = (int16_t *)(uintptr_t)&shared_batch->samples[0];
+		ret = adc_sampler_read_samples(samples,
+					       RF_LINK_MEMS_BATCH_SAMPLE_COUNT);
+		if (ret != 0) {
+			update_lp_trace(ret);
+			rf_link_lp_trace_note_fatal((uint32_t)-ret);
+			return ret;
+		}
+
+		shared_batch->capture_end_ms = k_uptime_get_32();
+		crc = crc32_ieee((const uint8_t *)samples,
+				 sizeof(shared_batch->samples));
+		shared_batch->sample_crc32 = crc;
+		barrier_dmem_fence_full();
+#if defined(CONFIG_CACHE_MANAGEMENT)
+		(void)sys_cache_data_flush_range((void *)(uintptr_t)shared_batch,
+						 sizeof(*shared_batch));
+#endif
+		barrier_dmem_fence_full();
+
+		ret = ipc_tx_publish_batch(slot_index, batch_seq, crc,
+					   K_MSEC(BATCH_IPC_TIMEOUT_MS));
+		update_lp_trace(ret);
+		if (ret == 0) {
+			rf_link_lp_trace_note_batch(batch_seq, slot_index);
+			batch_seq++;
 		}
 	}
 }

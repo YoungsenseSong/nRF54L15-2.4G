@@ -1,362 +1,176 @@
 # nRF54L15 Private 2.4G Wireless Data Link
 
-基于 nRF54L15 Connect Kit 的私有 2.4GHz 无线数据链路工程。发送端采用 `cpuapp + cpuflpr` 双核结构，LP 核生成 16bit 采样帧并通过 IPC 交给 HP 核，HP 核基于 Nordic ESB 完成无线发送；接收端采用单核结构，负责接收数据帧、统计吞吐率、丢包、重复包和链路延时，并支持通过串口导出 CSV 实验数据。
+基于 nRF54L15 Connect Kit 的私有 2.4 GHz 无线数据链路。当前成熟路径由
+IIM-42352 三轴 MEMS、双核 TX 和单核 RX 组成：FLPR 连续采集，累计 4096 个
+`int16_t` 样本后通过共享内存 + ICMsg 通知 CPUAPP；CPUAPP 从 System ON idle
+唤醒并沿用既有 Nordic ESB 链路发送。
 
-This repository is a private 2.4 GHz wireless data-link project based on the
-nRF54L15 Connect Kit. The current implementation focuses on a point-to-point
-16-bit sample transport path using Nordic ESB, with a dual-core transmitter and
-a single-core receiver.
+This repository implements an IIM-42352-to-private-2.4-GHz data path on the
+nRF54L15 Connect Kit. FLPR acquires MEMS data continuously, publishes full
+4096-sample shared-memory batches through ICMsg, and wakes CPUAPP to transmit
+the data through the existing Nordic ESB link.
 
-The original Makerdiary nRF54L15 Connect Kit repository is used as the hardware
-and board-support base. This repository entrypoint documents the RF link
-application, experiment records, and current performance findings.
+The Makerdiary nRF54L15 Connect Kit repository remains the board-support base.
 
-## Project Scope
+## Project scope
 
-- Build a private 2.4 GHz wireless link on nRF54L15.
-- Use `cpuapp` as the high-performance TX control core.
-- Use `cpuflpr` as the lightweight TX sampling/data-generation core.
-- Exchange TX-side data between LP and HP cores through `ipc_service` + `icmsg`.
-- Send framed 16-bit sample data over ESB.
-- Receive data on a simple single-core RX application.
-- Export UART statistics and optional real RX frame CSV logs for later paper/patent evidence.
+- IIM-42352 Packet 1 FIFO acquisition on FLPR through SPIM00.
+- CPUAPP System ON idle while no full batch is available.
+- Two cache-line-aligned 4096-sample shared SRAM slots.
+- Bidirectional ICMsg ready/release ownership protocol with CRC32 validation.
+- Existing 204-byte ESB frame, 4 Mbps preferred PHY, channel 40, and no-ACK
+  streaming mode.
+- Single-core RX statistics and optional accepted-frame binary export.
+- Host tools for status capture, raw frame capture, and batch verification.
 
-## Repository Entry Points
+## Repository entry points
 
 | Path | Purpose |
 | --- | --- |
-| `applications/rf_link_tx/` | Dual-core transmitter application. |
-| `applications/rf_link_tx/flpr_app/` | LP core child image for fake sampling and IPC TX. |
-| `applications/rf_link_rx/` | Single-core receiver application. |
-| `applications/rf_link_rx/stream.conf` | Optional RX sample-stream capture configuration. |
-| `applications/rf_link_README.md` | Application-level README with build, flash, and UART use. |
-| `applications/rf_link_DESIGN.md` | Architecture and design notes. |
-| `applications/rf_link_development_log.txt` | Short devlog for each development step. |
-| `applications/rf_link_experiment_records.md` | Experiment notes and captured UART snippets. |
-| `applications/rf_link_experiment_logs/` | Per-experiment raw excerpts and optimization table. |
-| `applications/rf_link_parameter_matrix.csv` | Version/parameter comparison table. |
-| `applications/rf_link_tag_notes/` | Five-line notes for each project tag. |
-| `save_serial_csv.py` | PC-side UART statistics to CSV capture tool. |
-| `dump_rx_frames.py` | PC-side binary RX frame capture tool for the optional v0.6 stream build. |
-| `export_fake_adc_csv.py` | Host-side exporter for the current TX fake-ADC sample pattern. |
+| `applications/rf_link_tx/` | Dual-core MEMS transmitter. |
+| `applications/rf_link_tx/flpr_app/` | FLPR IIM-42352 acquisition image. |
+| `applications/rf_link_rx/` | Single-core ESB receiver. |
+| `applications/rf_link_README.md` | Build, flash, runtime, and capture guide. |
+| `applications/rf_link_DESIGN.md` | Current architecture and ownership protocol. |
+| `applications/rf_link_INTEGRATION_REPORT.md` | Merge audit, conflict report, and hardware test plan. |
+| `applications/rf_link_development_log.txt` | Historical development log. |
+| `applications/rf_link_experiment_records.md` | Historical bench evidence. |
+| `applications/rf_link_experiment_logs/` | Raw experiment excerpts and optimization matrix. |
+| `dump_rx_frames.py` | RX binary UART stream to CSV. |
+| `verify_mems_batches.py` | Verify 4096-sample batch boundaries and sequence. |
+| `save_serial_csv.py` | TX/RX text status capture. |
 
-## Current Architecture
+## Current architecture
 
 ```text
-TX LP core cpuflpr
-  fake ADC/sample generator
-  frame buffer
-  IPC sender
-
-        |
-        v
-
-TX HP core cpuapp
-  IPC receiver
-  TX queue
-  ESB PTX radio sender
-  MAC latency statistics
-  UART status output
-
-        |
-        v
-
-RX cpuapp
-  ESB PRX radio receiver
-  frame validation
-  sequence/loss statistics
-  optional rx_sample_stream tap
-  UART status output or binary frame stream
+IIM-42352, 4 kHz per axis
+  -> FLPR SPIM00 + FIFO watermark
+  -> shared SRAM ping-pong slots, 4096 int16 samples
+  -> CRC32 + ICMsg ready descriptor
+  -> VEVIF interrupt wakes CPUAPP from System ON idle
+  -> 42 x 96-sample frames + 1 x 64-sample frame
+  -> ESB PTX, channel 40, 4 Mbps preferred, no-ACK
+  -> ESB PRX
+  -> frame validation, loss statistics, optional binary UART export
 ```
 
-## Current Frame Format
+4096 means 4096 scalar `int16_t` values in XYZ-interleaved order. At 4 kHz per
+axis the aggregate rate is 12 ksps and the useful average payload is
+192 kbit/s. A batch is acquired approximately every 341.3 ms.
 
-The current RF payload is a fixed 204-byte application frame:
+## RF frame format
+
+The main repository's fixed 204-byte wire protocol is retained:
 
 ```c
 struct rf_frame {
     uint16_t magic;          /* 0xA55A */
     uint16_t seq;            /* wraps at 65535 */
-    uint16_t sample_count;   /* 96 */
-    uint16_t flags;
+    uint16_t sample_count;   /* 96, final batch frame is 64 */
+    uint16_t flags;          /* MEMS / batch-start / batch-end */
     uint32_t timestamp_ms;
     int16_t samples[96];
 } __packed;
 ```
 
-Raw sample arrays are intentionally not printed on the default statistics UART.
-In the optional `v0.6` stream build, accepted frames are exported as binary
-records instead of text so the serial port does not become the measurement
-bottleneck.
+TX and RX now include one common protocol header so the frame definition cannot
+silently drift between applications.
 
-## Current Radio Parameters
+## Current parameters
 
 | Item | Current value |
 | --- | --- |
-| Radio backend | Nordic ESB |
-| TX mode | PTX |
-| RX mode | PRX |
-| PHY | 4 Mbps on nRF54L15 when supported, otherwise 2 Mbps fallback |
+| Sensor | IIM-42352 |
+| Sensor mode | Low-noise, +/-16 g, 4 kHz/axis |
+| SPI | Mode 3, 8 MHz |
+| Batch | 4096 x `int16_t`, two shared slots |
+| Aggregate rate | 12 ksps / 192 kbit/s useful payload |
+| Radio | Nordic ESB PTX/PRX |
+| PHY | 4 Mbps preferred, 2 Mbps compile-time fallback |
 | Channel | 40 |
-| ACK | No-ACK streaming payloads |
-| Application frame | 204 bytes |
-| Samples per frame | 96 x 16-bit |
-| TX period | 1920 us |
-| UART status period | 1000 ms |
-| Current stress target | 50 ksps x 16-bit = 800 kbps payload |
-
-## Current Performance Status
-
-Two key operating points have been recorded:
-
-| Version | Target | Result |
-| --- | --- | --- |
-| `v0.3-rf-link-docs-devlog` baseline notes | 16-bit 50 kbps-class link | 32 samples every 10 ms, about 51.2 kbps payload target. |
-| `v0.4-50ksps-load-test` | 50 ksps x 16-bit, 800 kbps payload | RX observed about 286 to 306 kbps with high sequence loss and TX queue drops. |
-| `v0.5-rf-throughput-optimization` | Increase RF headroom for 50 ksps | 4 Mbps/no-ACK/96-sample frame firmware builds completed. The 2026-04-24 intermediate stable excerpt before deadline pacing reached `774144 bps`, and the current working state after deadline pacing reaches about `800256 bps` or about `50016 sps`. |
-| `v0.6-rx-sample-stream-export` | Add real RX sample export without changing the default link path | Default RX build remains statistics-only. An optional `stream.conf` build adds accepted-frame binary export on `COM7` at `2000000` baud plus `dump_rx_frames.py` for CSV capture. Both builds pass locally; hardware stream capture is the next bench step. |
-
-The latest measured 50 ksps test (`v0.4`) shows the old
-`1 Mbps ESB + ACK + 76-byte frame` configuration is throughput-limited. The
-full version-by-version optimization path, code-level fix details, and
-zero-throughput debug closure are recorded in:
-
-- `applications/rf_link_development_log.txt`
-- `applications/rf_link_experiment_logs/optimization_attempts.md`
-- `applications/rf_link_experiment_records.md`
-
-## Common Communication Parameters
-
-The project uses these common engineering quantities:
-
-| Parameter | Definition | Formula | `v0.3` reference | `v0.4` target | `v0.5` target | `v0.5` current measured |
-| --- | --- | --- | --- | --- | --- | --- |
-| `sample_bits` | Bits per sample | fixed | 16 | 16 | 16 | 16 |
-| `samples_per_frame` | Samples in one application frame | fixed by protocol | 32 | 32 | 96 | 96 |
-| `frame_payload_bits` | Useful sample bits in one frame | `samples_per_frame * sample_bits` | 512 | 512 | 1536 | 1536 |
-| `period_us` | Target frame period | fixed by firmware | 10000 us | 640 us | 1920 us | 1920 us |
-| `pps` | Packets per second | `1 / period_s` or `payload_bps / frame_payload_bits` | 100 pps | 1562.5 pps | 520.8 pps | about 521 pps |
-| `sample_rate` | Samples per second | `pps * samples_per_frame` | 3200 sps | 50000 sps | 50000 sps | about 50016 sps |
-| `payload_bps` | Useful sample bitrate | `sample_rate * sample_bits` or `pps * frame_payload_bits` | 51200 bps | 800000 bps | 800000 bps | about 800256 bps |
-
-Notes:
-
-- The `774144 bps` value is a `2026-04-24` intermediate stable excerpt captured
-  before LP absolute-deadline pacing. It corresponds to
-  `774144 / 1536 = 504 pps` and `504 * 96 = 48384 sps`.
-- The current reported working state after deadline pacing is
-  `800256 bps`, which corresponds to `800256 / 1536 = 521 pps` and
-  `521 * 96 = 50016 sps`.
+| ACK | No-ACK streaming |
+| RF frame | 204 bytes, up to 96 samples |
 
 ## Build
 
-From the NCS project root:
+Builds do not require attached hardware.
 
 ```powershell
 cd D:\nRF54L15\NCS-Project
 .\.venv\Scripts\Activate.ps1
 cd nrf54l15-connectkit
+
+west build -p always --sysbuild -d build_rf_link_tx_mems `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
+
+west build -p always -d build_rf_link_rx_mems `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
 ```
 
-Build TX dual-core application:
+Optional RX binary stream build:
 
 ```powershell
-west build -p always --sysbuild -d build_rf_link_tx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
-```
-
-Build RX single-core application:
-
-```powershell
-west build -p always -d build_rf_link_rx -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
-```
-
-Build the optional RX sample-stream variant in the same fixed build directory:
-
-```powershell
-west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west build -p always -d build_rf_link_rx_stream `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
 
 ## Flash
 
-Flash TX HP core:
+TX requires both CPUAPP and FLPR images:
 
 ```powershell
-west flash -d build_rf_link_tx --domain rf_link_tx
+pyocd list
+pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\rf_link_tx\zephyr\zephyr.hex
+pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\flpr_app\zephyr\zephyr.hex
+pyocd load -u <RX_ID> -t nrf54l build_rf_link_rx_mems\rf_link_rx\zephyr\zephyr.hex
 ```
 
-Flash TX LP core:
+## Hardware validation
+
+The TX and RX builds pass locally with NCS 3.1.0. Hardware was not connected
+during the integration, so sensor wiring, WHO_AM_I, FIFO interrupt capture,
+measured power, sustained RF loss, and long-duration double-buffer behavior
+remain to be verified.
+
+Use the acceptance procedure in
+[`applications/rf_link_INTEGRATION_REPORT.md`](applications/rf_link_INTEGRATION_REPORT.md).
+The short version is:
+
+1. Confirm SPIM00 wiring and the `P0.02` INT1/board-LED conflict.
+2. Flash both TX images and the RX image.
+3. Confirm each TX batch adds 4096 `samples_ok` and 43 `frames_ok`.
+4. Require zero shared-memory CRC/header errors and zero FIFO overflows.
+5. Check RX long-term average near 12 ksps / 192 kbit/s.
+6. Capture at least 220 RX frames and run:
 
 ```powershell
-pyocd load -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
+python .\verify_mems_batches.py .\2.4g_results\mems_batch_test.csv
 ```
 
-Flash RX:
+## Historical milestones
 
-```powershell
-west flash -d build_rf_link_rx
-```
-
-## UART Statistics
-
-TX prints:
-
-```text
-TX stat sent=... ipc_rx=... queued=... q_drop=... ipc_bad_size=... ipc_bad_magic=... rf_ok=... rf_fail=... rf_timeout=... rf_err=... attempts=... mac_cnt=... mac_last_us=... mac_min_us=... mac_avg_us=... mac_max_us=... lp_stage=... lp_boots=... lp_fatal=... lp_fatal_reason=... lp_loop=... lp_seq=... lp_ok=... lp_busy=... lp_fail=... lp_ret=...
-```
-
-RX prints:
-
-```text
-RX stat frames=... samples=... bps=... lost=... dup=... bad=... rf_evt=... rf_frames=... rf_read_err=... seq=... first=... last=...
-```
-
-TX numeric parameter meanings:
-
-| UART name | Meaning |
-| --- | --- |
-| `TX stat sent` | HP side successfully transmitted frames over ESB. |
-| `TX stat ipc_rx` | HP side frames received from LP through IPC. |
-| `TX stat queued` | IPC frames accepted into the HP TX queue. |
-| `TX stat q_drop` | Frames dropped before RF send because the queue path could not keep up. |
-| `TX stat ipc_bad_size` | IPC payload size was not the expected `rf_frame` size. |
-| `TX stat ipc_bad_magic` | IPC payload failed frame validation. |
-| `TX stat rf_ok` | ESB reported TX success. |
-| `TX stat rf_fail` | ESB reported TX failure. |
-| `TX stat rf_timeout` | HP timed out waiting for TX completion. |
-| `TX stat rf_err` | Local TX-side write/setup error before a packet completed. |
-| `TX stat attempts` | Attempt count reported for the latest ESB packet. |
-| `TX stat mac_cnt` | Number of packets included in MAC latency statistics. |
-| `TX stat mac_last_us` | Latest packet MAC latency in microseconds. |
-| `TX stat mac_min_us` | Minimum recorded MAC latency in microseconds. |
-| `TX stat mac_avg_us` | Average MAC latency in microseconds. |
-| `TX stat mac_max_us` | Maximum recorded MAC latency in microseconds. |
-| `TX stat lp_stage` | LP state: `0 reset`, `1 boot`, `2 IPC ready`, `3 IPC bound`, `4 run`. |
-| `TX stat lp_boots` | Historical LP boot counter stored in shared trace memory. |
-| `TX stat lp_fatal` | Historical LP fatal counter stored in shared trace memory. |
-| `TX stat lp_fatal_reason` | Last recorded LP fatal reason. |
-| `TX stat lp_loop` | LP main loop iterations. |
-| `TX stat lp_seq` | Latest LP-generated frame sequence. |
-| `TX stat lp_ok` | LP frames successfully sent into IPC. |
-| `TX stat lp_busy` | LP IPC send retries due to busy/full conditions. |
-| `TX stat lp_fail` | LP IPC send failures after retries. |
-| `TX stat lp_ret` | Last LP IPC send return value. |
-
-RX numeric parameter meanings:
-
-| UART name | Meaning |
-| --- | --- |
-| `RX stat frames` | Frames accepted by RX application logic after basic validation. |
-| `RX stat samples` | Total accepted samples. |
-| `RX stat bps` | Effective payload bitrate calculated from accepted sample bytes, not air-interface bitrate. |
-| `RX stat lost` | Sequence-gap based lost-frame counter. |
-| `RX stat dup` | Duplicate or old-sequence frame counter. |
-| `RX stat bad` | Invalid frame counter (`bad_magic + bad_size`). |
-| `RX stat rf_evt` | Number of ESB RX events seen by the radio callback. |
-| `RX stat rf_frames` | Number of payloads read from the ESB RX FIFO. |
-| `RX stat rf_read_err` | Unexpected RX event/read-side error count. |
-| `RX stat seq` | Latest accepted frame sequence. |
-| `RX stat first` | First sample value of the latest accepted frame. |
-| `RX stat last` | Last sample value of the latest accepted frame. |
-
-These fields are intended for throughput and stability measurement. Raw sample
-arrays are intentionally not printed on UART so the serial port does not become
-the measurement bottleneck.
-
-Use the CSV capture tool:
-
-```powershell
-python .\save_serial_csv.py --list-ports
-python .\save_serial_csv.py --port COM7 --output rx_stats.csv
-python .\save_serial_csv.py --port COM11 --output tx_stats.csv
-```
-
-`save_serial_csv.py` saves UART application statistics only. It does not save
-per-sample payload arrays because the current firmware does not print raw
-samples on UART.
-
-If you need the current TX-side fake source pattern without changing firmware,
-use:
-
-```powershell
-python .\export_fake_adc_csv.py --frames 1000 --output-dir "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results"
-```
-
-That command exports the deterministic fake-ADC pattern from
-`applications/rf_link_tx/flpr_app/src/adc_sampler.c`, not actual RX-captured
-samples.
-
-For real received samples, use the optional `v0.6` RX stream build in the
-dedicated `build_rf_link_rx_stream` directory. In this mode RX stops printing
-`RX stat ...` text and instead outputs accepted frames as binary records on
-`COM7` at `2000000` baud. The default `build_rf_link_rx` directory remains the
-statistics build.
-
-If `pyserial` is not installed yet:
-
-```powershell
-python -m pip install pyserial
-```
-
-Build and flash the RX stream variant:
-
-```powershell
-west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
-west flash -d build_rf_link_rx_stream
-```
-
-Then capture real received frames to CSV:
-
-```powershell
-python .\dump_rx_frames.py --port COM7
-python .\dump_rx_frames.py --port COM7 --max-frames 1000 --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
-```
-
-`dump_rx_frames.py` saves one CSV row per accepted RF frame with metadata plus
-`sample_0` to `sample_95`. The default output directory is
-`D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results`.
-
-## Milestone Tags
+The previous fake-sample RF stress path is preserved in history and experiment
+records:
 
 | Tag | Meaning |
 | --- | --- |
 | `v0.1-rf-link-apps` | Runnable TX/RX RF link applications. |
-| `v0.2-rf-link-csv-capture` | UART status CSV capture tool. |
-| `v0.3-rf-link-docs-devlog` | README, design notes, devlog, experiment records. |
-| `v0.4-50ksps-load-test` | 50 ksps x 16-bit stress test evidence. |
-| `v0.5-rf-throughput-optimization` | 4 Mbps/no-ACK/96-sample throughput optimization build. |
-| `v0.6-rx-sample-stream-export` | Optional accepted-frame binary export and host CSV dump tool. |
+| `v0.2-rf-link-csv-capture` | UART statistics CSV capture. |
+| `v0.3-rf-link-docs-devlog` | Architecture and experiment documentation. |
+| `v0.4-50ksps-load-test` | 50 ksps load-test evidence. |
+| `v0.5-rf-throughput-optimization` | 4 Mbps/no-ACK/96-sample optimization. |
+| `v0.6-rx-sample-stream-export` | Optional accepted-frame binary export. |
 
-Each tag has a short note under `applications/rf_link_tag_notes/`.
+The prior 50 ksps fake-ramp path demonstrated approximately 800256 bit/s in
+the recorded working state. That is historical RF headroom evidence, not the
+current IIM-42352 sample rate. See the development log and optimization matrix
+for the exact conditions.
 
-## Next Optimization Experiments
+## Hardware base and license
 
-The next work should be recorded as continuous experiments. `v0.5` implements
-the first combined optimization build; the remaining work is measurement and
-controlled comparison:
+- [Makerdiary nRF54L15 Connect Kit](https://github.com/makerdiary/nrf54l15-connectkit)
+- [Makerdiary board documentation](https://wiki.makerdiary.com/nrf54l15-connectkit/)
 
-1. Measure `v0.5` at fixed distance and record RX bps/lost plus TX q_drop/MAC latency.
-2. Validate `v0.6` on hardware and confirm `stream_drop_total` stays low during real CSV capture.
-3. Run a controlled 2 Mbps comparison if 4 Mbps is unstable in range tests.
-4. Evaluate ACK-on or batch-ACK control frames after no-ACK payload capacity is known.
-5. Add GPIO timing probes for hardware latency measurement.
-6. Replace fake samples with ADC DMA after RF throughput and v0.6 export path both remain stable.
-
-The tracking table is:
-
-```text
-applications/rf_link_experiment_logs/optimization_attempts.md
-```
-
-## Hardware Base
-
-This project is based on Makerdiary's nRF54L15 Connect Kit board support and
-development environment. For board hardware documentation, see:
-
-- https://github.com/makerdiary/nrf54l15-connectkit
-- https://wiki.makerdiary.com/nrf54l15-connectkit/
-
-## License
-
-This repository inherits the original project license files where applicable.
-New project documentation and application code should be reviewed together with
-the existing `LICENSE` and `LICENSE-NORDIC` files.
+This repository inherits the original license files where applicable. Review
+`LICENSE` and `LICENSE-NORDIC` with the application source.

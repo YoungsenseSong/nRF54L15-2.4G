@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "proto.h"
+#include "rf_link_proto.h"
 
 struct rx_reorder_stats {
 	uint32_t frames;

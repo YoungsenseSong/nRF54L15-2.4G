@@ -16,9 +16,11 @@ target_sources(app PRIVATE
   src/debug_uart.c
   src/ipc_bridge.c
   src/radio_link.c
-  src/tx_queue.c
 )
 
-target_include_directories(app PRIVATE src)
+target_include_directories(app PRIVATE
+  src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../rf_link_common
+)
 
 # NORDIC SDK APP END

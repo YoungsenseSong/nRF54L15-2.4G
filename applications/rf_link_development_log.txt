@@ -365,3 +365,52 @@ Current limitation
   - RF throughput remains near the current working state
   - `stream_drop_total` remains low during capture
   - the PC can sustain long CSV writes at the chosen baud
+
+Version focus: IIM-42352 4096-sample batch integration (untagged)
+----------------------------------------------------------------
+
+Goal
+- Replace the FLPR fake ramp with real IIM-42352 acquisition.
+- Let CPUAPP block in System ON idle until FLPR has 4096 int16 samples.
+- Preserve the main repository's 204-byte ESB frame and RX implementation.
+
+Reference repository audit
+- Compared main baseline `f635103` with `Ins1ghtt/2.4g-mems-` tip `371be76`.
+- The repositories had no usable common Git history, so changes were audited
+  file by file instead of merged as histories.
+- Accepted the IIM-42352 wiring and FIFO acquisition intent.
+- Rejected per-frame HP binary UART output because it competes with the real
+  ESB output path.
+- Rejected unrelated RX DPPI, board Kconfig, document attachment, and archive
+  changes.
+
+Reference implementation issues corrected
+- The reference code used a 1024-byte FIFO watermark but read at most 256 bytes.
+- FIFO count was read high-byte first even though FIFO_COUNTL latches both bytes.
+- The default 100 us interrupt pulse was left enabled at 4 kHz ODR; the
+  datasheet requires the 8 us selection at ODR >= 4 kHz.
+- Packet validation checked only header bit 6 rather than Packet 1's full
+  `0100_00xx` pattern.
+- The reference ring contained only 384 int16 values and still sent 96-sample
+  IPC frames, so it did not implement the requested 4096-sample handoff.
+
+Final implementation
+- Added two cache-line-aligned shared SRAM slots, each holding 4096 int16 samples.
+- Added CRC32-protected ICMsg batch-ready and batch-release descriptors.
+- FLPR owns a slot while filling; CPUAPP owns it after ready; FLPR cannot reuse
+  it until the matching sequence release arrives.
+- CPUAPP waits forever on a batch queue, so the kernel can idle the core and a
+  VEVIF mailbox interrupt wakes it.
+- CPUAPP initializes ESB lazily on the first valid batch.
+- One batch becomes 42 full 96-sample frames and one 64-sample final frame.
+- Added MEMS, batch-start, and batch-end RF flags without changing the 204-byte
+  wire size.
+- Added `verify_mems_batches.py` for captured CSV validation.
+
+Offline validation
+- NCS 3.1.0 TX sysbuild passed for CPUAPP and FLPR.
+- FLPR RAM: about 58.3 KB of 96 KB.
+- TX CPUAPP RAM: about 25.1 KB of 160 KB.
+- RX CPUAPP build passed; RAM: about 19.2 KB of 188 KB.
+- No hardware was attached. SPI electrical behavior, INT1 capture, RF loss,
+  power, and long-run stability remain explicit bench-test items.

@@ -2,7 +2,7 @@
 #include <zephyr/kernel.h>
 
 #include "debug_uart.h"
-#include "proto.h"
+#include "rf_link_proto.h"
 #include "radio_link.h"
 #include "rx_reorder.h"
 #include "rx_sample_stream.h"

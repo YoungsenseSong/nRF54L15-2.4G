@@ -20,6 +20,7 @@ target_sources(app PRIVATE
 target_include_directories(app PRIVATE
   src
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../rf_link_common
 )
 
 # NORDIC SDK APP END

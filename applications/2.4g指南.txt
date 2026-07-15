@@ -1,130 +1,204 @@
-applications/
-├── rf_link_tx/                      # 发送端，双核
-│   ├── CMakeLists.txt
-│   ├── prj.conf
-│   ├── sysbuild.conf
-│   ├── sysbuild.cmake
-│   ├── src/
-│   │   ├── main.c                   # HP主入口
-│   │   ├── radio_link.c             # ESB发送
-│   │   ├── ipc_bridge.c             # IPC收数/通知
-│   │   ├── tx_queue.c               # 发送队列
-│   │   ├── debug_uart.c             # 直驱UART调试
-│   │   └── proto.h                  # 帧格式定义
-│   ├── boards/
-│   │   └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
-│   └── flpr_app/
-│       ├── CMakeLists.txt
-│       ├── prj.conf
-│       ├── src/
-│       │   ├── main.c               # LP主入口
-│       │   ├── adc_sampler.c        # 先假数据，后替换ADC
-│       │   ├── sample_buffer.c      # LP环形缓冲
-│       │   └── ipc_tx.c             # 向HP通知/送块
-│       └── boards/
-│           └── nrf54l15_connectkit_nrf54l15_cpuflpr.overlay
-│
-└── rf_link_rx/                      # 接收端，单核
-    ├── CMakeLists.txt
-    ├── prj.conf
-    ├── src/
-    │   ├── main.c
-    │   ├── radio_link.c             # ESB接收
-    │   ├── rx_reorder.c             # seq检查/重组
-    │   └── debug_uart.c             # 向PC输出统计
-    └── boards/
-        └── nrf54l15_connectkit_nrf54l15_cpuapp.overlay
+nRF54L15 IIM-42352 + 私有 2.4G 使用指南
+==========================================
 
-0. 公共准备命令
+一、当前工程
 
-如果你还没拉仓库：
+TX：applications/rf_link_tx
+- 双核 sysbuild。
+- FLPR 通过 SPIM00 采集 IIM-42352。
+- 每累计 4096 个 int16 标量样本，通过共享 SRAM + ICMsg 通知 CPUAPP。
+- CPUAPP 平时阻塞并进入 System ON idle，由 VEVIF/IPC 中断唤醒。
+- CPUAPP 将一批拆成 43 个固定 204 字节 ESB 帧发送。
 
-cd D:\nRF54L15\NCS-Project
+RX：applications/rf_link_rx
+- 单核 CPUAPP。
+- 接收 ESB 帧，统计帧数、样本数、有效 bit/s、丢包、重复和坏帧。
+- 可选 stream.conf 二进制导出完整样本。
 
-git clone https://github.com/YoungsenseSong/nRF54L15-2.4G.git nrf54l15-connectkit
-cd .\nrf54l15-connectkit
+详细架构、冲突报告、接线与验收步骤：
+applications/rf_link_INTEGRATION_REPORT.md
 
-git checkout codex/rf-link-2p4g-devlog
-git pull
-
-如果你本地已经有仓库：
+二、编译（不需要连接开发板）
 
 cd D:\nRF54L15\NCS-Project
 .\.venv\Scripts\Activate.ps1
+cd nrf54l15-connectkit
 
-cd D:\nRF54L15\NCS-Project\nrf54l15-connectkit
+west build -p always --sysbuild -d build_rf_link_tx_mems -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_tx
+west build -p always -d build_rf_link_rx_mems -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx
 
-git checkout codex/rf-link-2p4g-devlog
-git pull
+RX 完整样本导出版：
 
-查看两块板子的 pyOCD 序列号：
+west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+
+三、烧录
+
+先查看板卡序列号：
 
 pyocd list
 
-下面命令里我用：
+TX 必须烧两个镜像：
 
-<TX_ID>
-<RX_ID>
+pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\rf_link_tx\zephyr\zephyr.hex
+pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\flpr_app\zephyr\zephyr.hex
 
-表示你需要替换成 pyocd list 看到的实际序列号
+RX：
 
-方案一：普通串口应用信息 / 统计版
+pyocd load -u <RX_ID> -t nrf54l build_rf_link_rx_mems\rf_link_rx\zephyr\zephyr.hex
 
-编译：
-west build -p always `
-  -d build_rf_link_tx `
-  -b nrf54l15_connectkit/nrf54l15/cpuapp `
-  applications\rf_link_tx
-  
-west build -p always `
-  -d build_rf_link_rx `
-  -b nrf54l15_connectkit/nrf54l15/cpuapp `
-  applications\rf_link_rx
+如测试完整样本导出，把最后一个路径换成：
 
+build_rf_link_rx_stream\rf_link_rx\zephyr\zephyr.hex
 
-烧录：
-pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\rf_link_tx\zephyr\zephyr.hex
-pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
-pyocd load -u 820D9A5F0F3BA22B8E4ES -t nrf54l build_rf_link_rx\rf_link_rx\zephyr\zephyr.hex
+四、TX 串口
 
-方案二：RX 样本流版 / 真实样本导出版
+启动后应先看到：
 
-编译：
-west build -p always `
-  -d build_rf_link_tx `
-  -b nrf54l15_connectkit/nrf54l15/cpuapp `
-  applications\rf_link_tx
+LP IPC bound; CPUAPP blocking until a 4096-sample batch is ready
 
-west build -p always `
-  -d build_rf_link_rx_stream `
-  -b nrf54l15_connectkit/nrf54l15/cpuapp `
-  applications\rf_link_rx `
-  -- "-DEXTRA_CONF_FILE=stream.conf"
+这表示双核 IPC 已绑定，CPUAPP 正在等待，不会循环轮询。
 
-烧录：
+第一批 4096 样本到达时应看到：
 
-pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\rf_link_tx\zephyr\zephyr.hex
-pyocd load -u 820D9A5F0F3CEA5784A8F -t nrf54l build_rf_link_tx\flpr_app\zephyr\zephyr.hex
-pyocd load -u 820D9A5F0F3BA22B8E4ES -t nrf54l build_rf_link_rx_stream\rf_link_rx\zephyr\zephyr.hex
+radio ready after first MEMS batch
 
-默认抓取：
+之后的格式类似：
 
-python .\dump_rx_frames.py --port COM7
+TX stat batches_rx=... batches_ok=... batch_bad_hdr=... batches_fail=... batch_bad_crc=... frames_try=... frames_ok=... frames_fail=... samples_ok=... ipc_bad=... ipc_drop=... release_err=... rf_ok=... rf_fail=... rf_timeout=... mac_avg_us=... lp_stage=... lp_batches=... lp_samples=... lp_irq=... lp_poll=... lp_malformed=... lp_io_err=... lp_fifo_ovf=... lp_slot_wait=... lp_fatal=... lp_fatal_reason=...
 
-抓固定帧数并指定输出文件：
+主要字段：
 
-python .\dump_rx_frames.py `
-  --port COM7 `
-  --max-frames 1000 `
-  --output "D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results\rx_frames_1000.csv"
+batches_rx
+HP 收到的 4096 样本批次数。
 
+batches_ok
+HP 完成全部 RF 帧发送且没有本地发送错误的批次数。
 
-Codex 对话里说明，dump_rx_frames.py 默认会把 CSV 保存到：
+batches_fail
+批内至少有一个 RF 帧发送失败的批次数。
 
-D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results
+batch_bad_hdr / batch_bad_crc
+共享内存槽头或 CRC32 校验错误。正常必须为 0。
 
-在 rx_sample_stream.c (line 1) / rx_sample_stream.h (line 1) 里加了一个默认关闭的 RX 二进制导出模块
-接在 rx_reorder.c (line 73) 的“已验收帧”后面；默认 build_rf_link_rx 还是你现在的稳定统计版，不会改链路结构。
-只有用 stream.conf (line 1) 重新编译 RX 时，才会切到 COM7 @ 2000000 的二进制流模式，并停止输出 RX stat ... 文本。
-PC 侧新增了 dump_rx_frames.py (line 1)，它会把真实接收帧保存成一帧一行的 CSV
-列里带 stream_drop_total、rf_seq、sample_0 到 sample_95。
+frames_try
+尝试发送的 RF 帧数。每个完整批次增加 43。
+
+frames_ok / frames_fail
+ESB 成功/失败帧数。
+
+samples_ok
+成功 RF 发送的样本数。每个无错误完整批次增加 4096。
+
+ipc_bad / ipc_drop / release_err
+核间描述符格式错误、队列丢弃、共享槽释放失败。正常必须为 0。
+
+rf_ok / rf_fail / rf_timeout
+ESB 发送成功、失败、等待完成超时。
+
+mac_avg_us
+从提交 ESB payload 到发送完成事件的平均时间。
+
+lp_stage
+LP 阶段：1 启动，2 IPC ready，3 IPC bound，4 传感器 ready，5 填充批次，6 批次 ready。
+
+lp_batches
+LP 已发布批次数。
+
+lp_samples
+LP 已放入批次的数据样本数。
+
+lp_irq
+捕获到的 IIM-42352 FIFO 水位中断次数。
+
+lp_poll
+100 ms 内没有收到 GPIO 中断、通过轮询恢复的次数。偶发可以继续观察，持续增加要检查 INT1 接线、极性和 P0.02。
+
+lp_malformed
+FIFO 包头或 FIFO 长度异常计数。正常为 0。
+
+lp_io_err
+SPI/传感器访问错误。正常为 0。
+
+lp_fifo_ovf
+IIM FIFO 已满、覆盖未读取数据的次数。正常为 0。
+
+lp_slot_wait
+两个共享槽都被 HP 占用，LP 等待释放的次数。持续增加表示无线发送跟不上采集。
+
+lp_fatal / lp_fatal_reason
+LP fatal 计数及最后原因。启动后不应增加。
+
+健康 TX 应满足：
+- batches_rx 与 batches_ok 持续增加，约 2.9 批/秒。
+- frames_ok 每批增加 43。
+- samples_ok 每批增加 4096。
+- 所有 bad、drop、fail、timeout、overflow 字段保持 0。
+
+五、RX 串口
+
+格式：
+
+RX stat frames=... samples=... bps=... lost=... dup=... bad=... rf_evt=... rf_frames=... rf_read_err=... seq=... first=... last=...
+
+frames
+通过基本校验的 RF 帧数。
+
+samples
+有效样本累计数。每个完整 MEMS 批次应增加 4096。
+
+bps
+最近统计窗口内的有效样本 bit/s。长期平均应接近 192000 bit/s；TX 是批量突发，一秒窗口会波动。
+
+lost
+按 16bit RF seq 跳号计算的丢帧数。
+
+dup
+重复或旧序号帧数。
+
+bad
+长度、magic 或 sample_count 不合法的帧数。
+
+rf_evt / rf_frames / rf_read_err
+ESB RX 事件、成功读出的 payload、读错误。
+
+seq
+最近一帧 RF 序号。
+
+first / last
+最近一帧第一个和最后一个有效样本。真实 MEMS 不再满足假 ramp 的 last-first 固定关系。
+
+健康 RX 应满足：
+- samples 长期平均约增加 12000/秒。
+- bps 长期平均约 192000。
+- bad、dup、rf_read_err 为 0。
+- lost 不持续快速增加。
+
+六、抓取并验证真实样本
+
+使用 build_rf_link_rx_stream 固件后：
+
+python .\dump_rx_frames.py --port COM7 --max-frames 220 --output .\2.4g_results\mems_batch_test.csv
+python .\verify_mems_batches.py .\2.4g_results\mems_batch_test.csv
+
+验证成功时应有：
+- bad_batches=0
+- incomplete_batches=0
+- non_mems_frames=0
+- sequence_gaps=0
+
+每批正好 43 帧、4096 样本。
+
+七、接线注意
+
+SCLK=P2.01
+MOSI=P2.02
+MISO=P2.04
+CS=P2.00
+INT1=P0.02
+
+P0.02 在原 Connect Kit 板级 DTS 中也是 LED0。本工程的 FLPR overlay 已禁用 LED0，把该脚交给 MEMS INT1；上板前必须确认实际硬件没有冲突或强驱动。
+
+八、当前验证边界
+
+已完成 NCS 3.1.0 离线构建：TX CPUAPP、TX FLPR、RX CPUAPP 均通过。
+由于当前没有连接硬件，尚未声称以下项目通过：WHO_AM_I、真实 SPI 波形、8 us INT1 捕获、长时间 FIFO 无溢出、无线丢包率和实测功耗。

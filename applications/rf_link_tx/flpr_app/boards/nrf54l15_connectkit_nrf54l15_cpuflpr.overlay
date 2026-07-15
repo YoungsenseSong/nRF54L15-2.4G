@@ -15,6 +15,14 @@
 			rf_link_lp_trace_mem: memory@20020800 {
 				reg = <0x20020800 0x0100>;
 			};
+
+			rf_link_mems_slot0: memory@20021000 {
+				reg = <0x20021000 0x2100>;
+			};
+
+			rf_link_mems_slot1: memory@20023100 {
+				reg = <0x20023100 0x2100>;
+			};
 		};
 	};
 
@@ -39,6 +47,44 @@
 	status = "okay";
 };
 
+&pinctrl {
+	spi00_default: spi00_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 2, 1)>,
+				<NRF_PSEL(SPIM_MOSI, 2, 2)>,
+				<NRF_PSEL(SPIM_MISO, 2, 4)>;
+		};
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio2 {
+	status = "okay";
+};
+
+/* P0.02 is the MEMS INT1 input in this product wiring, not the board LED. */
+&led0 {
+	status = "disabled";
+};
+
+&spi00 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi00_default>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;
+
+	mems_sensor: iim42352@0 {
+		compatible = "tdk,iim42352";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+		int1-gpios = <&gpio0 2 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	};
+};
+
 &uart30 {
-	/delete-property/ hw-flow-control;
+	status = "disabled";
 };
