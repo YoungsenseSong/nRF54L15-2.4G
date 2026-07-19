@@ -21,6 +21,8 @@ The Makerdiary nRF54L15 Connect Kit repository remains the board-support base.
 - Existing 204-byte ESB frame, 4 Mbps preferred PHY, channel 40, and no-ACK
   streaming mode.
 - Single-core RX statistics and optional accepted-frame binary export.
+- Optional V2 software-preintegration RX pipeline for logical synchronization
+  and a CRC-protected ZYNQ transport contract.
 - Host tools for status capture, raw frame capture, and batch verification.
 
 ## Repository entry points
@@ -33,6 +35,8 @@ The Makerdiary nRF54L15 Connect Kit repository remains the board-support base.
 | `applications/rf_link_README.md` | Build, flash, runtime, and capture guide. |
 | `applications/rf_link_DESIGN.md` | Current architecture and ownership protocol. |
 | `applications/rf_link_INTEGRATION_REPORT.md` | Merge audit, conflict report, and hardware test plan. |
+| `applications/rf_link_ROADMAP.md` | V1 two-board acceptance test and V2-V6 upgrade roadmap. |
+| `applications/rf_link_FUTURE_INTEGRATION.md` | V2 software preintegration, queue, transport, pin candidates, and acceptance plan. |
 | `applications/rf_link_development_log.txt` | Historical development log. |
 | `applications/rf_link_experiment_records.md` | Historical bench evidence. |
 | `applications/rf_link_experiment_logs/` | Raw experiment excerpts and optimization matrix. |
@@ -114,6 +118,25 @@ west build -p always -d build_rf_link_rx_stream `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
   -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
+
+V2 software-preintegration RX build, with software SYNC and diagnostic
+auto-commit transport:
+
+```powershell
+west build -p always -d build_rf_link_rx_future `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=future.conf"
+```
+
+The V2 preview preserves the current 204-byte V1 air frame. It adds receiver-side
+32-bit sequence extension, explicit missing ranges, a 64-record static queue,
+logical synchronization epochs, and a 248-byte CRC-protected FPGA record. Real
+SPIS, DRDY, and GPIOTE-DPPI-TIMER SYNC capture remain disabled until the
+receiver adapter schematic is frozen.
+
+The current V1 requires only one TX and one RX for hardware acceptance. Its
+two-board test matrix and the staged V2-V6 plan are defined in
+[`applications/rf_link_ROADMAP.md`](applications/rf_link_ROADMAP.md).
 
 ## Flash
 

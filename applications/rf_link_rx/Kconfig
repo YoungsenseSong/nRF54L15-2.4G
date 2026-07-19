@@ -1,7 +1,18 @@
 menu "RF Link RX options"
 
+config RF_LINK_RADIO_QUEUE_DEPTH
+	int "Deferred radio packet queue depth"
+	range 4 128
+	default 64 if RF_LINK_FUTURE_MODE
+	default 16
+	help
+	  Number of raw ESB packets that can be deferred from the ESB event ISR to
+	  thread context. A full queue drops the new packet and increments an
+	  explicit overflow counter; old packets are never overwritten.
+
 config RF_LINK_RX_SAMPLE_STREAM
 	bool "Enable accepted-frame binary stream on RX UART"
+	depends on !RF_LINK_FUTURE_MODE
 	default n
 	help
 	  Copy each accepted rf_frame into a binary UART stream after RX validation.
@@ -32,6 +43,90 @@ config RF_LINK_RX_SAMPLE_STREAM_THREAD_STACK_SIZE
 	default 2048
 	help
 	  Stack size for the UART stream drain thread.
+
+config RF_LINK_FUTURE_MODE
+	bool "V2-preview RX pipeline for synchronized ZYNQ aggregation"
+	default n
+	help
+	  Add the bounded frame queue, V1 sequence extension, synchronization
+	  manager, and FPGA transport abstraction. The RF wire format remains the
+	  existing fixed 204-byte V1 frame.
+
+if RF_LINK_FUTURE_MODE
+
+config RF_LINK_FRAME_QUEUE_DEPTH
+	int "V2-preview frame queue depth"
+	range 64 256
+	default 64
+	help
+	  Number of statically allocated 204-byte RF frame records retained for the
+	  selected FPGA transport. Queue overflow is reported and never overwrites
+	  unread data.
+
+config RF_LINK_NODE_ID
+	int "Fixed receiver node identifier"
+	range 0 255
+	default 0
+	help
+	  Node identifier added to receiver-side metadata while the V1 air frame
+	  does not carry a node identifier.
+
+config RF_LINK_SYNC_MANAGER
+	bool "Receiver logical synchronization manager"
+	default y
+	help
+	  Track synchronization epochs and align the first valid BATCH_START frame
+	  after a software or hardware capture to logical sample index zero.
+
+config RF_LINK_SYNC_TIMEOUT_MS
+	int "Synchronization acquisition timeout in milliseconds"
+	depends on RF_LINK_SYNC_MANAGER
+	range 10 60000
+	default 1500
+
+config RF_LINK_SYNC_LARGE_GAP_FRAMES
+	int "Frame gap threshold that degrades synchronization"
+	depends on RF_LINK_SYNC_MANAGER
+	range 1 32767
+	default 256
+
+config RF_LINK_SYNC_HW_CAPTURE
+	bool "Board-provided GPIOTE-DPPI-TIMER SYNC capture backend"
+	depends on RF_LINK_SYNC_MANAGER
+	default n
+	help
+	  Reserved for a board overlay that defines the actual SYNC_IN pin, TIMER,
+	  GPIOTE, and DPPI route. The current Connect Kit build intentionally leaves
+	  this off because the receiver schematic and pin assignment are unknown.
+
+config RF_LINK_FPGA_TRANSPORT
+	bool "FPGA record transport abstraction"
+	default y
+	help
+	  Wrap accepted RF frames in versioned, CRC-protected records for a selected
+	  receiver-to-ZYNQ backend.
+
+choice RF_LINK_FPGA_TRANSPORT_BACKEND
+	prompt "FPGA transport backend"
+	depends on RF_LINK_FPGA_TRANSPORT
+	default RF_LINK_DEBUG_UART_TRANSPORT
+
+config RF_LINK_DEBUG_UART_TRANSPORT
+	bool "Diagnostic auto-commit backend"
+	help
+	  Validate and account for each FPGA record, then auto-commit it without
+	  writing the raw payload to UART. Periodic UART status remains available.
+
+config RF_LINK_FPGA_SPIS
+	bool "V2-preview command-oriented SPIS backend"
+	help
+	  Select only after a receiver-board overlay defines SPIS, DRDY, and pinctrl.
+	  The protocol engine is present now, but the physical backend is deliberately
+	  not bound to an invented Connect Kit pin assignment.
+
+endchoice
+
+endif
 
 endmenu
 

@@ -11,3 +11,15 @@ tests:
       - EXTRA_CONF_FILE=stream.conf
     integration_platforms:
       - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_v2_preview:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=future.conf
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_v2_preview_no_transport:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=future_no_transport.conf
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp

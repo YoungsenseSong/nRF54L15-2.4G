@@ -14,6 +14,13 @@ hardware test procedure, see
 - `rf_link_tx/flpr_app`: FLPR IIM-42352 acquisition image.
 - `rf_link_rx`: single-core ESB receiver and statistics image.
 - `rf_link_rx/stream.conf`: optional binary accepted-frame UART export.
+- `rf_link_rx/future.conf`: V2 software-preintegration receiver queue, logical synchronization,
+  and FPGA transport abstraction without binding unknown hardware pins.
+- `rf_link_rx/future_no_transport.conf`: V2-preview receive/sync regression
+  build with the debug and SPIS transports disabled.
+- `rf_link_FUTURE_INTEGRATION.md`: implemented boundaries, Connect Kit pin
+  candidates, counters, and hardware acceptance plan.
+- `rf_link_ROADMAP.md`: V1 two-board test matrix and V2-V6 development gates.
 - `dump_rx_frames.py`: capture the RX binary stream to CSV.
 - `verify_mems_batches.py`: verify sequence continuity and 4096-sample batch
   boundaries in a captured CSV.
@@ -107,6 +114,26 @@ west build -p always -d build_rf_link_rx_stream `
   -- "-DEXTRA_CONF_FILE=stream.conf"
 ```
 
+Build the V2 software-preintegration RX without ZYNQ or a physical SYNC input:
+
+```powershell
+west build -p always -d build_rf_link_rx_future `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=future.conf"
+```
+
+The default and stream configurations keep their established behavior. The V2
+preview moves validation out of the ESB IRQ, extends the 16-bit RF sequence to 32
+bits, represents missing intervals explicitly, and passes accepted frames
+through a 64-record static queue. Its software SYNC path aligns the first valid
+`BATCH_START` after a capture to logical sample index zero. This is logical
+alignment, not proof of simultaneous remote MEMS sampling.
+
+The current Future backend validates the 248-byte FPGA record and auto-commits
+it without dumping payload bytes to UART. The command-oriented SPIS engine is
+present, but real SPIS/DRDY/SYNC capture is held off until a receiver adapter
+schematic confirms the wiring. See `rf_link_FUTURE_INTEGRATION.md`.
+
 These builds do not require attached hardware.
 
 ## Flash
@@ -151,6 +178,9 @@ RX retains the existing status format:
 RX stat frames=... samples=... bps=... lost=... dup=... bad=...
 rf_evt=... rf_frames=... rf_read_err=... seq=... first=... last=...
 ```
+
+The V2 preview prints separate `RADIO`, `REORDER`, `SYNC`, `QUEUE`,
+`SPI_TRANSPORT`, and `CONTROL` lines so a fault is attributable to one layer.
 
 The long-term RX average should be close to 12000 samples/s and 192000 bit/s.
 The one-second `bps` value can vary because TX emits one burst per full batch.

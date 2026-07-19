@@ -41,11 +41,52 @@
 
 ### RX CPUAPP
 
-- Keeps the existing single-core ESB PRX path.
+- Keeps the existing single-core ESB PRX radio configuration.
+- The ESB direct-IRQ callback only reads payloads, captures a unified
+  `rx_tick`, and performs a non-blocking static queue put.
+- Frame validation, sequence extension, synchronization, CRC, and transport
+  work run in thread context.
 - Validates fixed wire size, magic, and variable `sample_count` from 1 to 96.
 - Uses RF sequence gaps to count lost frames.
 - Supports either one-second text statistics or the optional binary frame
   stream used by `dump_rx_frames.py`.
+
+### RX V2 software preintegration
+
+- Preserves the fixed 204-byte V1 air protocol and all ESB parameters.
+- Extends the 16-bit sequence to a continuous 32-bit internal value, including
+  the 65535-to-0 wrap.
+- Distinguishes forward loss, duplicate frames, and late frames. Missing V1
+  sample counts are explicit estimates and carry `INDEX_ESTIMATED`.
+- Stores complete frames plus metadata in a statically allocated 64-record
+  queue with peek and explicit commit ownership.
+- Tracks SYNC epochs through IDLE, ARMED, WAIT_START, ALIGNING, LOCKED,
+  DEGRADED, and ERROR states.
+- Maps the first valid `BATCH_START` after SYNC to logical index zero.
+- Wraps each record in a 40-byte metadata header, the original 204-byte frame,
+  and a CRC32, for a fixed 248-byte receiver-to-ZYNQ record.
+- Provides GET/PEEK/READ/COMMIT/DROP/control command semantics. The current
+  debug backend validates and auto-commits records; physical SPIS is not bound.
+
+The software alignment establishes a common logical starting sample. It does
+not synchronize the four remote MEMS sampling clocks. Physical simultaneous
+sampling, drift estimation, and high-resolution TX sample timestamps require a
+later bidirectional/V2 air protocol.
+
+## Future hardware boundary
+
+The Connect Kit Rev.A pinout exposes suitable P1 header pins and Nordic's
+nRF54L guidance favors PERI-domain `spi20`, `spi21`, or `spi22`. A provisional
+review mapping uses P1.4-P1.7 for SPIS, P1.9 for DRDY, and P1.10 for SYNC_IN,
+with `spi21` as the candidate instance. It is intentionally absent from the
+default overlay until the ZYNQ adapter schematic confirms wiring, voltage,
+mode, polarity, and fan-out.
+
+The current `timebase` uses the Zephyr cycle counter and provides a software
+capture injection interface. The final hardware path is SYNC_IN GPIOTE event
+through DPPI to a TIMER capture channel. Business modules use only the
+`timebase` API so that backend replacement does not change reorder or sync
+logic.
 
 ## Shared-memory ownership protocol
 
@@ -109,3 +150,8 @@ attached hardware. Hardware validation is still required for pin wiring,
 WHO_AM_I, FIFO interrupt capture, sustained radio loss, and measured power.
 See `rf_link_INTEGRATION_REPORT.md` for the test procedure and acceptance
 criteria.
+
+The V2-preview RX also builds without ZYNQ or SYNC hardware. Its host contract
+tests cover sequence wrap/gaps, queue ownership, sync transitions, CRC errors,
+commit rules, and transport wrap. See `rf_link_FUTURE_INTEGRATION.md` for the
+software/hardware boundary and four-channel acceptance procedure.

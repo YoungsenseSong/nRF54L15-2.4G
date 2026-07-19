@@ -414,3 +414,88 @@ Offline validation
 - RX CPUAPP build passed; RAM: about 19.2 KB of 188 KB.
 - No hardware was attached. SPI electrical behavior, INT1 capture, RF loss,
   power, and long-run stability remain explicit bench-test items.
+
+Version focus: nRF V2 software preintegration for four-channel/ZYNQ reception
+-------------------------------------------------------------------------------
+
+Goal
+- Preserve the proven TX dual-core acquisition path and 204-byte V1 ESB frame.
+- Prepare RX firmware for four independent links, a common ZYNQ SYNC pulse,
+  explicit logical sample indices, and a future command-oriented SPIS path.
+- Keep default RX and UART stream builds usable without ZYNQ or SYNC wiring.
+
+Repository and callback audit
+- Baseline branch: codex/rf-link-2p4g-devlog at d40f02e.
+- Worktree was clean before the change.
+- NCS 3.1.0 / Zephyr 4.1.99 build provenance was retained.
+- Removed the ineffective TX CPUAPP `CONFIG_PRINTK=n` assignment because the
+  enabled NCS boot banner already selects PRINTK; generated behavior is
+  unchanged and the Kconfig conflict warning is gone.
+- The ESB event handler is called from the direct ESB event IRQ.
+- The old handler performed validation and sequence accounting in that IRQ.
+- RX UART30 occupies the spi30/uart30 shared peripheral address and P0.0/P0.1.
+- Available but disabled CPUAPP SPI targets include spi00, spi20, spi21,
+  spi22, and spi30; TIMER00/10/20-24, GPIOTE20/30, and DPPI domains are visible.
+
+Concurrency change
+- The ESB callback now only reads payloads, takes a timebase tick, and uses a
+  K_NO_WAIT put into a statically allocated radio queue.
+- All validation, CRC, sequence extension, synchronization, and transport work
+  moved to the RX main thread.
+- Default RX uses 16 deferred radio records; the V2 preview uses 64.
+- Queue full always increments a counter and drops the new record. No old data
+  is silently overwritten.
+
+V2 software-preintegration modules
+- rf_link_future.h: internal metadata and fixed 248-byte FPGA record.
+- frame_queue: 64-record static queue with peek and explicit commit.
+- rx_reorder: 16-to-32-bit wrap, forward loss, duplicate/late classification,
+  missing intervals, logical index, and INDEX_ESTIMATED.
+- timebase: one API for receive ticks and software SYNC capture injection.
+- sync_manager: IDLE/ARMED/WAIT_START/ALIGNING/LOCKED/DEGRADED/ERROR.
+- fpga_transport: selected-backend ownership and record construction.
+- fpga_spi_transport: GET/STATUS/PEEK/READ/COMMIT/DROP/control protocol engine.
+- link_control: bounded ARM/START/STOP/RESET command state.
+
+Wire compatibility
+- The air frame remains rf_frame V1 and exactly 204 bytes.
+- protocol_version, node_id, extended sequence, sync_epoch, rx_tick, and
+  logical_sample_index are receiver-side metadata only.
+- Missing V1 frame sample counts are estimated at the maximum 96 samples and
+  marked as estimates; samples are never fabricated by repeating old data.
+
+Connect Kit Rev.A pin audit
+- P0.2 is LED0, P0.3 is USER, and P0.0/P0.1 are UART30, so they are excluded
+  from the preferred V2 connector group.
+- Candidate review mapping: P1.4 SCK, P1.5 MOSI, P1.6 MISO, P1.7 CSN,
+  P1.9 DRDY, and P1.10 SYNC_IN; candidate peripheral spi21.
+- This mapping is documented but not enabled in the default overlay. The ZYNQ
+  adapter schematic must confirm it before physical SPIS/SYNC code is enabled.
+
+Offline validation so far
+- Default RX: FLASH 62396 B, RAM 22776 B, passed.
+- V2-preview RX: FLASH 68860 B, RAM 48960 B, passed.
+- V2-preview RX with all transports disabled: FLASH 65852 B, RAM 48624 B,
+  passed.
+- The builds retain known NCS/Zephyr configuration/devicetree warnings; no
+  application compile or link error was present.
+- Thirteen host contract tests passed, covering the twelve requested behavior
+  groups plus source structure constants.
+- No hardware was attached or flashed during this implementation; the listed
+  results are offline build and host-test evidence only.
+
+Release documentation and verification: V1 baseline plus V2-V6 roadmap
+------------------------------------------------------------------------
+
+- Version terminology was frozen: V1 is the two-board single-link baseline;
+  `future.conf` is a V2 software-preintegration profile, not a completed V2.
+- Added `rf_link_ROADMAP.md` with the V1 two-board test matrix, measurements,
+  acceptance gates, and staged V2-V6 dependencies.
+- V2 is single-link ZYNQ SPIS/DRDY/SYNC integration; V3 is four-link logical
+  aggregation; V4 introduces the second-generation air protocol; V5 targets
+  physical sample synchronization and drift control; V6 is system hardening.
+- Rebuilt TX sysbuild, default RX, stream RX, V2-preview RX, and V2-preview RX
+  without transport under NCS 3.1.0. All builds completed successfully.
+- Re-ran thirteen host contract tests and `git diff --check`; both passed.
+- Hardware was still unavailable, so the V1 board tests remain an explicit
+  user-executed acceptance gate rather than a claimed result.

@@ -16,6 +16,15 @@ target_sources(app PRIVATE
   src/radio_link.c
   src/rx_reorder.c
   src/rx_sample_stream.c
+  src/timebase.c
+)
+
+target_sources_ifdef(CONFIG_RF_LINK_FUTURE_MODE app PRIVATE
+  src/frame_queue.c
+  src/sync_manager.c
+  src/fpga_transport.c
+  src/fpga_spi_transport.c
+  src/link_control.c
 )
 
 target_include_directories(app PRIVATE

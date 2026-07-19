@@ -7,12 +7,13 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/clock_control/nrf_clock_control.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/kernel.h>
 #include <esb.h>
 #include <nrf.h>
 #include <nrf_erratas.h>
 
 #include "rf_link_proto.h"
-#include "rx_reorder.h"
+#include "timebase.h"
 
 #if defined(CONFIG_CLOCK_CONTROL_NRF2)
 #include <hal/nrf_lrcconf.h>
@@ -40,10 +41,15 @@ BUILD_ASSERT(RF_LINK_FRAME_WIRE_SIZE <= CONFIG_ESB_MAX_PAYLOAD_LENGTH,
 static atomic_t rx_events;
 static atomic_t rx_frames;
 static atomic_t rx_read_errors;
+static atomic_t rx_queue_overflow;
+
+K_MSGQ_DEFINE(radio_rx_msgq, sizeof(struct radio_link_rx_packet),
+	      CONFIG_RF_LINK_RADIO_QUEUE_DEPTH, 8);
 
 static void radio_event_handler(const struct esb_evt *event)
 {
 	struct esb_payload payload;
+	struct radio_link_rx_packet packet;
 
 	switch (event->evt_id) {
 	case ESB_EVENT_TX_SUCCESS:
@@ -52,8 +58,14 @@ static void radio_event_handler(const struct esb_evt *event)
 	case ESB_EVENT_RX_RECEIVED:
 		atomic_inc(&rx_events);
 		while (esb_read_rx_payload(&payload) == 0) {
-			(void)rx_reorder_process_frame((const struct rf_frame *)payload.data,
-						       payload.length);
+			memset(&packet, 0, sizeof(packet));
+			packet.rx_tick = timebase_now_ticks();
+			packet.length = payload.length;
+			memcpy(&packet.frame, payload.data,
+			       MIN((size_t)payload.length, sizeof(packet.frame)));
+			if (k_msgq_put(&radio_rx_msgq, &packet, K_NO_WAIT) != 0) {
+				atomic_inc(&rx_queue_overflow);
+			}
 			atomic_inc(&rx_frames);
 		}
 		break;
@@ -201,6 +213,15 @@ int radio_link_init(void)
 	return esb_start_rx();
 }
 
+int radio_link_receive(struct radio_link_rx_packet *packet, k_timeout_t timeout)
+{
+	if (packet == NULL) {
+		return -EINVAL;
+	}
+
+	return k_msgq_get(&radio_rx_msgq, packet, timeout);
+}
+
 void radio_link_stats_get(struct radio_link_stats *stats)
 {
 	if (stats == NULL) {
@@ -210,6 +231,7 @@ void radio_link_stats_get(struct radio_link_stats *stats)
 	stats->rx_events = (uint32_t)atomic_get(&rx_events);
 	stats->rx_frames = (uint32_t)atomic_get(&rx_frames);
 	stats->rx_read_errors = (uint32_t)atomic_get(&rx_read_errors);
+	stats->rx_queue_overflow = (uint32_t)atomic_get(&rx_queue_overflow);
 }
 
 const char *radio_link_phy_label(void)
