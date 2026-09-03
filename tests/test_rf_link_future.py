@@ -120,7 +120,7 @@ class SyncModel:
                 self.state = SyncState.DEGRADED
 
 
-def crc16_ccitt(data, seed=0xFFFF):
+def crc16_ccitt_false(data, seed=0xFFFF):
     return binascii.crc_hqx(data, seed)
 
 
@@ -147,7 +147,7 @@ def build_transport_record(transport_seq, payload):
         1,
         len(payload),
     )
-    header_crc = crc16_ccitt(header_without_crc)
+    header_crc = crc16_ccitt_false(header_without_crc)
     header = header_without_crc + struct.pack("<H", header_crc)
     return TransportRecord(
         transport_seq,
@@ -183,6 +183,9 @@ class CommitModel:
 
 
 class FutureContractTests(unittest.TestCase):
+    def test_00_crc16_ccitt_false_reference_vector(self):
+        self.assertEqual(crc16_ccitt_false(b"123456789"), 0x29B1)
+
     def test_01_rf_sequence_wrap(self):
         tracker = SequenceTracker()
         values = [tracker.process(seq)[1][0] for seq in (0xFFFE, 0xFFFF, 0)]
@@ -253,12 +256,14 @@ class FutureContractTests(unittest.TestCase):
     def test_10_header_and_payload_crc_detection(self):
         payload = bytes(range(204))
         record = build_transport_record(3, payload)
-        self.assertEqual(crc16_ccitt(record.header[:-2]), record.header_crc)
+        self.assertEqual(crc16_ccitt_false(record.header[:-2]),
+                         record.header_crc)
         self.assertEqual(binascii.crc32(record.payload) & 0xFFFFFFFF,
                          record.payload_crc)
         damaged_header = bytearray(record.header)
         damaged_header[5] ^= 1
-        self.assertNotEqual(crc16_ccitt(damaged_header[:-2]), record.header_crc)
+        self.assertNotEqual(crc16_ccitt_false(damaged_header[:-2]),
+                            record.header_crc)
         damaged_payload = bytearray(record.payload)
         damaged_payload[100] ^= 1
         self.assertNotEqual(binascii.crc32(damaged_payload) & 0xFFFFFFFF,
@@ -287,8 +292,12 @@ class FutureContractTests(unittest.TestCase):
     def test_source_contract_constants_are_present(self):
         repo = Path(__file__).resolve().parents[1]
         header = (repo / "applications/rf_link_rx/src/rf_link_future.h").read_text()
+        spi_header = (repo / "applications/rf_link_rx/src/fpga_spi_transport.h").read_text()
         kconfig = (repo / "applications/rf_link_rx/Kconfig").read_text()
         self.assertIn("BUILD_ASSERT(sizeof(struct fpga_record) == 248u", header)
+        self.assertIn("FPGA_SPI_REQUEST_SIZE  8u", spi_header)
+        self.assertIn("FPGA_SPI_RESPONSE_SIZE 260u", spi_header)
+        self.assertIn("min_request_response_gap_us", spi_header)
         self.assertIn("range 64 256", kconfig)
 
 

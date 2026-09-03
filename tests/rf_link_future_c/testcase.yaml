@@ -1,0 +1,7 @@
+tests:
+  rf_link.future_c:
+    platform_allow:
+      - qemu_cortex_m3
+    tags:
+      - rf_link
+      - protocol
