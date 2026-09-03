@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <string.h>
+#include <zephyr/kernel.h>
 #include <zephyr/spinlock.h>
 #include <zephyr/sys/crc.h>
 
@@ -15,6 +16,7 @@
 #endif
 
 static struct k_spinlock transport_lock;
+K_MUTEX_DEFINE(transport_service_mutex);
 static struct transport_stats transport_stats_data;
 static uint32_t next_transport_seq;
 static uint32_t pending_extended_frame_seq;
@@ -243,10 +245,17 @@ int fpga_transport_service(void)
 	struct rx_frame_record source;
 	struct fpga_record record;
 	int processed = 0;
+	int result;
 	int ret;
 
+	ret = k_mutex_lock(&transport_service_mutex, K_FOREVER);
+	if (ret != 0) {
+		return ret;
+	}
+
 	if (!transport_initialized || !backend->ready()) {
-		return -EAGAIN;
+		result = -EAGAIN;
+		goto out_unlock;
 	}
 
 	while (frame_queue_peek(&source) == 0) {
@@ -259,7 +268,8 @@ int fpga_transport_service(void)
 		ret = fpga_transport_build_record(&source, next_transport_seq,
 						  &record);
 		if (ret != 0) {
-			return ret;
+			result = ret;
+			goto out_unlock;
 		}
 
 		ret = backend->submit(&record);
@@ -271,7 +281,8 @@ int fpga_transport_service(void)
 				transport_stats_data.crc_errors++;
 			}
 			k_spin_unlock(&transport_lock, key);
-			return ret;
+			result = ret;
+			goto out_unlock;
 		}
 
 		{
@@ -291,11 +302,16 @@ int fpga_transport_service(void)
 
 		ret = release_record(source.extended_frame_seq, false, NULL);
 		if (ret != 0) {
-			return ret;
+			result = ret;
+			goto out_unlock;
 		}
 	}
 
-	return processed;
+	result = processed;
+
+out_unlock:
+	k_mutex_unlock(&transport_service_mutex);
+	return result;
 }
 
 void fpga_transport_get_stats(struct transport_stats *stats)

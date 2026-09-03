@@ -20,7 +20,7 @@ FPGA record布局均不得因SPI调试而随意改变。
 
 - 仓库：`nrf54l15-connectkit`
 - 分支：`codex/rf-link-2p4g-devlog`
-- 本文更新时HEAD：`4e360863a3569c9494197ec701604404519d811d`
+- 本次并发修复前远端基线HEAD：`71c49e4a0dda789893b8bfce881d0c8d1db45f6c`
 - SDK：NCS 3.1.0，Zephyr 4.1.99
 - RX0 probe：`820D9A5F0F3BA22B8E4ES`，通常为COM11
 - TX0 probe：`820D9A5F0F3CEA5784A8F`，通常为COM10
@@ -28,8 +28,7 @@ FPGA record布局均不得因SPI调试而随意改变。
 - FPGA板：正点原子ATK-DF7010/7020P底板V3.9、CF7010B/7020B核心板、ZYNQ-7020
 - RX0 `VDD_GPIO`：用户实测约3.3 V；FPGA Bank13 VCCO=3.3 V/LVCMOS33
 
-工作树包含未提交修改和未跟踪的新文件。迁移或切换对话不得reset、checkout、clean，
-也不能只依赖HEAD重建当前状态。
+迁移或切换对话不得reset、checkout、clean；操作前先检查工作树状态。
 
 ## 3. 已验证状态
 
@@ -51,6 +50,13 @@ FPGA record布局均不得因SPI调试而随意改变。
 - 修正版已clean build并烧录RX0；映像SHA256：
   `559E07A5508AFE37C171AE03010826917E890B8C2C33E88701CBF0D24AA152F5`。
 - 修正版COM11启动正常；断电后FPGA未重新发起事务，因此FPGA侧CRC PASS仍待复验。
+- 后续实板日志出现`submit_errors=49`。源码确认RX主线程和SPIS worker可并发进入
+  `fpga_transport_service()`并对同一队首重复submit；现已用Zephyr mutex串行化完整服务
+  事务，保留COMMIT后立即stage下一条记录的行为。
+- 并发修复的软件验证：Python 14/14 PASS；生产C ztest交叉编译通过但因
+  `QEMU-NOTFOUND`未运行；CH0 clean build为Flash 79,708 B、RAM 53,416 B，镜像SHA256
+  `82B2FF7D32666E2D828A364FBC6191A612C4E175956634F3C7EC731BB68F5291`。该镜像尚未烧录，
+  `submit_errors=0`仍需实板复验。
 
 ## 4. CH0接口冻结值
 
@@ -73,18 +79,18 @@ RESET_N J4-38仅预留。
 
 ## 5. 当前构建和测试入口
 
-从NCS West根目录的虚拟环境进入仓库：
+当前源码位于F:，从D: West根目录经受控junction构建：
 
 ```powershell
 cd D:\nRF54L15\NCS-Project
 .\.venv\Scripts\Activate.ps1
-cd .\nrf54l15-connectkit
+cd .\MultiSensorResearch-nrf
 ```
 
 CH0 SPIS clean build：
 
 ```powershell
-west build -p always -d build_codex_ch0_spis_crcfix `
+west build -p always -d build_workspace_ch0_spis `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
   -- "-DEXTRA_CONF_FILE=ch0_spis.conf" `
      "-DEXTRA_DTC_OVERLAY_FILE=ch0_spis.overlay"
@@ -101,13 +107,16 @@ python -m unittest discover -s tests -p test_rf_link_future.py -v
 
 ## 6. 下一步唯一主要变量
 
-重新Program FPGA bitstream后，重复START_STREAM和PEEK：
+先烧录SHA-256为`82B2...F5291`的并发修复镜像，再重新Program FPGA bitstream并重复
+START_STREAM、PEEK和COMMIT：
 
 1. FPGA重新计算record header bytes0..37，必须CRC PASS；
 2. nRF COM11应看到`started>0`、`req_xfer/rsp_xfer/records`增长；
 3. payload CRC32仍须PASS；
 4. 重复PEEK保持相同队首；正确COMMIT后才推进；
 5. 保留FPGA日志、COM11日志和逻辑分析仪证据。
+6. 在同一统计窗口确认`submit_errors=0`且records/pop_total持续推进；queue overflow另按
+   吞吐与背压问题分析，不能与本次竞态混为一项。
 
 在这一步通过前，不得宣称CH0 SPI record闭环完成。
 

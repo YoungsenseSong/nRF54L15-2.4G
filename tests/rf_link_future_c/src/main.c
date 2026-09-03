@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/crc.h>
 #include <zephyr/ztest.h>
 
@@ -14,6 +15,24 @@
 
 static uint64_t fake_tick;
 static uint64_t captured_tick;
+static struct k_sem service_start;
+static struct k_sem service_done;
+static struct k_thread service_thread_a;
+static struct k_thread service_thread_b;
+K_THREAD_STACK_DEFINE(service_stack_a, 1024);
+K_THREAD_STACK_DEFINE(service_stack_b, 1024);
+
+static void transport_service_worker(void *result_ptr, void *unused_a,
+				     void *unused_b)
+{
+	int *result = result_ptr;
+
+	ARG_UNUSED(unused_a);
+	ARG_UNUSED(unused_b);
+	k_sem_take(&service_start, K_FOREVER);
+	*result = fpga_transport_service();
+	k_sem_give(&service_done);
+}
 
 int timebase_init(void)
 {
@@ -217,6 +236,42 @@ ZTEST(rf_link_future_c, test_debug_backend_auto_commit_actual_c_path)
 	fpga_transport_get_stats(&stats);
 	zassert_equal(stats.records, 1u);
 	zassert_equal(stats.crc_errors, 0u);
+	zassert_equal(stats.submit_errors, 0u);
+}
+
+ZTEST(rf_link_future_c, test_concurrent_transport_service_is_serialized)
+{
+	struct transport_stats stats;
+	struct rx_frame_record source;
+	int service_results[2] = {-1, -1};
+
+	zassert_ok(fpga_transport_init());
+	for (uint32_t i = 0u; i < 64u; i++) {
+		source = make_record(i);
+		zassert_ok(frame_queue_push(&source));
+	}
+
+	k_sem_init(&service_start, 0, 2);
+	k_sem_init(&service_done, 0, 2);
+	k_thread_create(&service_thread_a, service_stack_a,
+			K_THREAD_STACK_SIZEOF(service_stack_a),
+			transport_service_worker, &service_results[0], NULL, NULL,
+			5, 0, K_NO_WAIT);
+	k_thread_create(&service_thread_b, service_stack_b,
+			K_THREAD_STACK_SIZEOF(service_stack_b),
+			transport_service_worker, &service_results[1], NULL, NULL,
+			5, 0, K_NO_WAIT);
+	k_sem_give(&service_start);
+	k_sem_give(&service_start);
+	zassert_ok(k_sem_take(&service_done, K_SECONDS(1)));
+	zassert_ok(k_sem_take(&service_done, K_SECONDS(1)));
+	zassert_ok(k_thread_join(&service_thread_a, K_SECONDS(1)));
+	zassert_ok(k_thread_join(&service_thread_b, K_SECONDS(1)));
+
+	zassert_equal(service_results[0] + service_results[1], 64);
+	zassert_equal(frame_queue_level(), 0u);
+	fpga_transport_get_stats(&stats);
+	zassert_equal(stats.records, 64u);
 	zassert_equal(stats.submit_errors, 0u);
 }
 

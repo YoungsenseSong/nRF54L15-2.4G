@@ -618,3 +618,34 @@ SHA-256 559E07A5508AFE37C171AE03010826917E890B8C2C33E88701CBF0D24AA152F5
 构建日志明确显示板级DTS来自F:当前源码。实验性`SPI_SLAVE`、空console library与全局
 assert为配置警告，不是构建失败。构建目录被现有`/build*`规则忽略，构建前后Git dirty
 条目均为41。该结果证明迁移后的当前源码可离线构建，不代替烧录或CH0实板验收。
+
+## 18. 2026-09-03 `submit_errors`并发根因与软件修复
+
+用户实板日志出现`records=1957`、`submit_errors=49`，同时frame queue已有大量overflow。
+源码审计确认`fpga_transport_service()`有两个不同线程入口：RX主线程在收帧和主循环中
+调用，SPIS worker在COMMIT/DROP成功后也会立即调用。原实现只用`transport_lock`保护统计
+字段，没有保护完整的“peek队首 -> 检查pending -> build -> submit”事务。两个线程可同时
+peek同一队首并都观察到无pending；先进入者stage成功，后进入者从backend得到`-EBUSY`，
+随后被笼统计入`submit_errors`。这也会并发读写全局`pending_extended_frame_seq`。
+
+修复在`fpga_transport.c`增加Zephyr mutex，对整个`fpga_transport_service()`事务串行化，
+所有返回路径均在统一出口解锁。没有删除SPIS worker的服务调用，因此正确COMMIT后仍会
+立即stage下一条记录，不引入等待主循环下一轮的额外延迟。原有spinlock继续只承担短时
+统计/序号字段保护；无线参数、队列深度、record格式、SPI线协议和DRDY语义均未改变。
+
+新增C ztest以两个同优先级线程同时服务64条记录，验收队列清空、总处理数64、records=64
+且`submit_errors=0`；Python source-contract也固定mutex定义和入口加锁。软件侧验证结果：
+
+- `python -m unittest tests.test_rf_link_future -v`：14/14 PASS；
+- `qemu_cortex_m3`生产C ztest clean build：139步完成，Flash 38,764 B、RAM 28,008 B；
+- C ztest runtime仍未执行，运行目标明确失败于本机`QEMU-NOTFOUND`；
+- CH0 SPIS `-p always` clean build：275步完成，Flash 79,708 B、RAM 53,416 B；
+- 新`merged.hex` SHA-256：
+  `82B2FF7D32666E2D828A364FBC6191A612C4E175956634F3C7EC731BB68F5291`；
+- `git diff --check`通过。
+
+以上证明修复已通过源码合约、C交叉编译和真实CH0配置编译，不证明实板竞态已经消失。
+下一步需将上述新镜像烧录RX0，在相同FPGA流量和统计窗口下复测：`submit_errors`应保持0，
+`records`与`pop_total`持续推进；同时分别观察`spi_errors/parser_errors/short_xfer`，避免把
+真实物理层错误误归因于本次并发问题。queue overflow是吞吐/背压问题，不能因为
+`submit_errors`清零就视为一并解决。

@@ -223,6 +223,7 @@ west build -p always -d build_rf_link_rx_future_no_transport `
 | V2 预集成 RX | 68,860 B | 48,960 B | 通过 |
 | V2 预集成 RX，无 transport | 65,852 B | 48,624 B | 通过 |
 | CH0 SPIS CRC修正版 | 79,672 B | 53,400 B | clean build通过；已烧录RX0 |
+| CH0 SPIS submit并发修正版 | 79,708 B | 53,416 B | clean build通过；尚未烧录/实板复验 |
 
 V2 预集成配置相对默认 RX 的 RAM 增加26,184 B，主要来自64条 IRQ 退让记录和64条240字节
 frame queue；无堆分配。主机契约测试覆盖序号回绕、前向跳变、重复/过晚帧、64帧

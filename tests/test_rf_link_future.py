@@ -293,11 +293,15 @@ class FutureContractTests(unittest.TestCase):
         repo = Path(__file__).resolve().parents[1]
         header = (repo / "applications/rf_link_rx/src/rf_link_future.h").read_text()
         spi_header = (repo / "applications/rf_link_rx/src/fpga_spi_transport.h").read_text()
+        transport_source = (repo / "applications/rf_link_rx/src/fpga_transport.c").read_text()
         kconfig = (repo / "applications/rf_link_rx/Kconfig").read_text()
         self.assertIn("BUILD_ASSERT(sizeof(struct fpga_record) == 248u", header)
         self.assertIn("FPGA_SPI_REQUEST_SIZE  8u", spi_header)
         self.assertIn("FPGA_SPI_RESPONSE_SIZE 260u", spi_header)
         self.assertIn("min_request_response_gap_us", spi_header)
+        self.assertIn("K_MUTEX_DEFINE(transport_service_mutex)", transport_source)
+        self.assertIn("k_mutex_lock(&transport_service_mutex, K_FOREVER)",
+                      transport_source)
         self.assertIn("range 64 256", kconfig)
 
 
