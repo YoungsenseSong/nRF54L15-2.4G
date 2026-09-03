@@ -36,7 +36,11 @@ The Makerdiary nRF54L15 Connect Kit repository remains the board-support base.
 | `applications/rf_link_DESIGN.md` | Current architecture and ownership protocol. |
 | `applications/rf_link_INTEGRATION_REPORT.md` | Merge audit, conflict report, and hardware test plan. |
 | `applications/rf_link_ROADMAP.md` | V1 two-board acceptance test and V2-V6 upgrade roadmap. |
-| `applications/rf_link_FUTURE_INTEGRATION.md` | V2 software preintegration, queue, transport, pin candidates, and acceptance plan. |
+| `applications/rf_link_FUTURE_INTEGRATION.md` | V2 queue/transport design, frozen CH0 pin mapping, SPI contract, and acceptance plan. |
+| `docs/PROJECT_CONTEXT.md` | Current CH0 state and shortest entry point for a new Codex conversation. |
+| `docs/WORKSPACE_MIGRATION.md` | Stable multi-root workspace and physical-migration checklist. |
+| `docs/PAPER_EVIDENCE_INDEX.md` | Paper-ready facts, evidence locations, and claims that remain unverified. |
+| `handoff.md` | Chronological commands, build results, hardware logs, blockers, and exact next action. |
 | `applications/rf_link_development_log.txt` | Historical development log. |
 | `applications/rf_link_experiment_records.md` | Historical bench evidence. |
 | `applications/rf_link_experiment_logs/` | Raw experiment excerpts and optimization matrix. |
@@ -116,7 +120,7 @@ Optional RX binary stream build:
 ```powershell
 west build -p always -d build_rf_link_rx_stream `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
-  -- "-DEXTRA_CONF_FILE=stream.conf"
+  -- "-DEXTRA_CONF_FILE=stream.conf" "-DEXTRA_DTC_OVERLAY_FILE=stream.overlay"
 ```
 
 V2 software-preintegration RX build, with software SYNC and diagnostic
@@ -128,11 +132,27 @@ west build -p always -d build_rf_link_rx_future `
   -- "-DEXTRA_CONF_FILE=future.conf"
 ```
 
-The V2 preview preserves the current 204-byte V1 air frame. It adds receiver-side
+The V2 path preserves the current 204-byte V1 air frame. It adds receiver-side
 32-bit sequence extension, explicit missing ranges, a 64-record static queue,
-logical synchronization epochs, and a 248-byte CRC-protected FPGA record. Real
-SPIS, DRDY, and GPIOTE-DPPI-TIMER SYNC capture remain disabled until the
-receiver adapter schematic is frozen.
+logical synchronization epochs, and a 248-byte CRC-protected FPGA record. The
+default `future.conf` still uses the diagnostic auto-commit backend. The
+separate `ch0_spis.conf` + `ch0_spis.overlay` integration build enables real
+SPIS00, level DRDY, and GPIOTE-GPPI/DPPI-TIMER SYNC capture on the reviewed
+Connect Kit Rev.A pins.
+
+CH0 SPIS CRC-fix build:
+
+```powershell
+west build -p always -d build_codex_ch0_spis_crcfix `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=ch0_spis.conf" `
+     "-DEXTRA_DTC_OVERLAY_FILE=ch0_spis.overlay"
+```
+
+Its 248-byte record header uses CRC-16/CCITT-FALSE over bytes 0..37; payload
+CRC32 and the record layout are unchanged. FPGA control commands have been seen
+on real hardware, but the CRC-fixed record path still requires a post-power-cycle
+FPGA reprogram and PEEK/COMMIT retest. See `docs/PROJECT_CONTEXT.md`.
 
 The current V1 requires only one TX and one RX for hardware acceptance. Its
 two-board test matrix and the staged V2-V6 plan are defined in
@@ -151,21 +171,26 @@ pyocd load -u <RX_ID> -t nrf54l build_rf_link_rx_mems\rf_link_rx\zephyr\zephyr.h
 
 ## Hardware validation
 
-The TX and RX builds pass locally with NCS 3.1.0. Hardware was not connected
-during the integration, so sensor wiring, WHO_AM_I, FIFO interrupt capture,
-measured power, sustained RF loss, and long-duration double-buffer behavior
-remain to be verified.
+The TX/RX wireless CH0 path has completed a recorded 30-minute q64 run. It
+received 224,158 valid frames and 21,352,320 valid samples with 44 lost frames
+(0.019625%), zero duplicates, zero bad application frames, and zero local radio
+queue overflow. This is a measured no-ACK loss result, not a zero-loss claim.
+
+FPGA hardware has exercised GET_INFO, GET_STATUS, ARM_SYNC, START_STREAM, and
+PEEK. A header CRC mismatch was traced to the nRF reflected CRC helper and fixed
+to CRC-16/CCITT-FALSE. The corrected RX image has been built and flashed, but
+FPGA-side CRC PASS, COMMIT closure, 10,000 records, and the two-hour SPI run are
+still pending.
 
 Use the acceptance procedure in
 [`applications/rf_link_INTEGRATION_REPORT.md`](applications/rf_link_INTEGRATION_REPORT.md).
 The short version is:
 
-1. Confirm SPIM00 wiring and the `P0.02` INT1/board-LED conflict.
-2. Flash both TX images and the RX image.
-3. Confirm each TX batch adds 4096 `samples_ok` and 43 `frames_ok`.
-4. Require zero shared-memory CRC/header errors and zero FIFO overflows.
-5. Check RX long-term average near 12 ksps / 192 kbit/s.
-6. Capture at least 220 RX frames and run:
+1. Read `docs/PROJECT_CONTEXT.md` and the last two `handoff.md` sections.
+2. Confirm each TX batch adds 4096 `samples_ok` and 43 `frames_ok`.
+3. Require zero shared-memory CRC/header errors and zero FIFO overflows.
+4. Check RX long-term average near 12 ksps / 192 kbit/s.
+5. Capture at least 220 RX frames and run:
 
 ```powershell
 python .\verify_mems_batches.py .\2.4g_results\mems_batch_test.csv

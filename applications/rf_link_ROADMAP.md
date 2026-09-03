@@ -13,10 +13,11 @@
 | V5 | 物理同步采样、漂移测量与校正 | 完整四路系统及同步控制链路 |
 | V6 | 长稳、故障恢复、性能功耗和可交付工程化 | 定型硬件 |
 
-当前仓库中的 `rf_link_rx/future.conf` 是 **V2 软件预集成配置**。其中的接收队列、
-逻辑同步状态机和 ZYNQ 记录协议已经实现并可离线测试，但真实 SPIS、DRDY 和
-GPIOTE-DPPI-TIMER SYNC 捕获尚未绑定硬件，因此不计入 V1 上板验收，也不代表
-V2 已完成。
+当前仓库中的 `rf_link_rx/future.conf` 是 **V2调试/自动提交配置**；独立的
+`ch0_spis.conf`和`ch0_spis.overlay`已经绑定真实SPIS00、电平DRDY及
+GPIOTE20-GPPI/DPPI-TIMER20 SYNC capture。FPGA实板已走到PEEK；首轮暴露的header
+CRC算法不一致已在nRF修正并重新烧录，但断电后尚未重新Program FPGA复验。因此V2
+仍未完成，当前准确状态见`../docs/PROJECT_CONTEXT.md`和根`handoff.md`最后两节。
 
 ## 2. V1：两块 nRF 的上板测试
 
@@ -44,7 +45,7 @@ west build -p always -d build_rf_link_rx_mems `
 
 west build -p always -d build_rf_link_rx_stream `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
-  -- "-DEXTRA_CONF_FILE=stream.conf"
+  -- "-DEXTRA_CONF_FILE=stream.conf" "-DEXTRA_DTC_OVERLAY_FILE=stream.overlay"
 
 python -B -m unittest -v tests.test_rf_link_future
 ```
@@ -103,16 +104,17 @@ python .\save_serial_csv.py --port <RX_COM> `
 
 目标是先把一块 RX nRF 与 ZYNQ 的数据和控制闭环做稳定，不立即扩展四路。
 
-计划内容：
+当前进度：
 
-- 与 ZYNQ 端冻结 SPI mode、最大时钟、CS 时序、电平、DRDY 极性和 SYNC 扇出；
-- 评审并冻结转接板原理图，再确定 `spi21` 及 P1.4-P1.10 候选引脚；
-- 增加独立 devicetree overlay 和 pinctrl，不改变默认 V1 构建；
-- 实现真实 nRF SPIS 从机后端和电平型 DRDY；
-- 实现 GPIOTE -> DPPI -> TIMER 的 SYNC 硬件捕获；
-- 联调 GET/STATUS/PEEK/READ/COMMIT/DROP/ARM/START/STOP/RESET；
-- 验证重复读取、错误 COMMIT、CRC 破坏、中断事务、超时和 ZYNQ 重启恢复；
-- 完成单路持续吞吐和至少 2 小时稳定性测试。
+- 已冻结mode0、MSB first、首次1 MHz、两次独立CS、8-byte request、260-byte
+  response、首轮A/B间隔>=1 ms和高有效保持型DRDY；
+- 已冻结Connect Kit Rev.A SPIS00 P2 dedicated pins、P1.10 DRDY和P1.09 SYNC_IN；
+- 已增加独立devicetree overlay和pinctrl，不改变默认V1构建；
+- 已实现真实nRF SPIS从机后端、电平型DRDY及GPIOTE -> GPPI/DPPI -> TIMER capture；
+- FPGA实板已确认GET_INFO、GET_STATUS、ARM_SYNC、START_STREAM和PEEK；
+- header CRC已统一为CRC-16/CCITT-FALSE，修正版已烧录RX0，FPGA侧PASS待复验；
+- 尚需验证重复PEEK、正确/错误/重复COMMIT、CRC破坏、事务中断、超时和重启恢复；
+- 尚需完成10,000 records与至少2小时CH0稳定性测试。
 
 V2 入口条件是 V1 有硬件基线，并且 ZYNQ 至少具备可运行的 SPI 主机原型。V2
 完成标志是一条真实 MEMS 数据链经无线到 RX，再经 SPIS 被 ZYNQ 正确提交和保存。

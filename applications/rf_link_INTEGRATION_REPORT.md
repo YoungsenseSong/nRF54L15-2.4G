@@ -1,5 +1,11 @@
 # MEMS 与私有 2.4G 工程整合报告
 
+> 状态说明（2026-09-03）：本文主体记录最初MEMS/无线合并过程，部分“尚未上板”描述是
+> 历史结论。当前CH0无线与ZYNQ SPIS进展请优先读取
+> [`../docs/PROJECT_CONTEXT.md`](../docs/PROJECT_CONTEXT.md)和
+> [`../handoff.md`](../handoff.md)最后两节；论文证据边界见
+> [`../docs/PAPER_EVIDENCE_INDEX.md`](../docs/PAPER_EVIDENCE_INDEX.md)。
+
 ## 整合基线
 
 - 主工程：`YoungsenseSong/nRF54L15-2.4G`，基线提交 `f635103`。
@@ -84,7 +90,10 @@ west build -p always -d build_rf_link_rx_mems `
 - RX CPUAPP：RAM 约 19.2 KB / 188 KB。
 - `git diff --check` 的代码部分无空白错误。
 
-当前没有硬件连接，因此 SPI 电气时序、传感器 WHO_AM_I、INT1 脉冲捕获、真实功耗、连续无线丢包率和长时间双缓冲稳定性仍需上板验证。
+上述尺寸是最初整合阶段的离线结果，不再代表当前CH0构建尺寸。后续硬件已经完成
+30分钟q64无线基线，实测44帧丢失、radio queue overflow=0；ZYNQ控制面已走到PEEK。
+CRC-16/CCITT-FALSE修正版RX已经clean build并烧录，但FPGA断电后尚未重新Program复验
+record header CRC。真实功耗、10,000 records和2小时SPI长稳仍未完成。
 
 ## 接板后的测试步骤
 
@@ -152,7 +161,7 @@ RX stat frames=... samples=... bps=... lost=... dup=... bad=...
 ```powershell
 west build -p always -d build_rf_link_rx_stream `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
-  -- "-DEXTRA_CONF_FILE=stream.conf"
+  -- "-DEXTRA_CONF_FILE=stream.conf" "-DEXTRA_DTC_OVERLAY_FILE=stream.overlay"
 
 python .\dump_rx_frames.py --port COM7 --max-frames 220 `
   --output .\2.4g_results\mems_batch_test.csv

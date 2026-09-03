@@ -65,28 +65,48 @@
 - Maps the first valid `BATCH_START` after SYNC to logical index zero.
 - Wraps each record in a 40-byte metadata header, the original 204-byte frame,
   and a CRC32, for a fixed 248-byte receiver-to-ZYNQ record.
-- Provides GET/PEEK/READ/COMMIT/DROP/control command semantics. The current
-  debug backend validates and auto-commits records; physical SPIS is not bound.
+- Provides GET/PEEK/READ/COMMIT/DROP/control command semantics. `future.conf`
+  uses the debug backend and auto-commits records. The separate CH0 integration
+  configuration binds the physical SPIS00 backend and retains explicit
+  PEEK/COMMIT ownership.
 
 The software alignment establishes a common logical starting sample. It does
 not synchronize the four remote MEMS sampling clocks. Physical simultaneous
 sampling, drift estimation, and high-resolution TX sample timestamps require a
 later bidirectional/V2 air protocol.
 
-## Future hardware boundary
+## CH0 hardware boundary
 
-The Connect Kit Rev.A pinout exposes suitable P1 header pins and Nordic's
-nRF54L guidance favors PERI-domain `spi20`, `spi21`, or `spi22`. A provisional
-review mapping uses P1.4-P1.7 for SPIS, P1.9 for DRDY, and P1.10 for SYNC_IN,
-with `spi21` as the candidate instance. It is intentionally absent from the
-default overlay until the ZYNQ adapter schematic confirms wiring, voltage,
-mode, polarity, and fan-out.
+The reviewed Connect Kit Rev.A mapping is isolated in `ch0_spis.overlay`:
 
-The current `timebase` uses the Zephyr cycle counter and provides a software
-capture injection interface. The final hardware path is SYNC_IN GPIOTE event
-through DPPI to a TIMER capture channel. Business modules use only the
-`timebase` API so that backend replacement does not change reorder or sync
-logic.
+| Signal | Connect Kit header | nRF GPIO/function |
+| --- | --- | --- |
+| SCK | J4-9 | P2.01 / SPIS00 SCK |
+| MOSI/SDI | J4-12 | P2.04 / SPIS00 SDI |
+| MISO/SDO | J4-10 | P2.02 / SPIS00 SDO |
+| CS_N | J4-13 | P2.05 / SPIS00 CSN |
+| DRDY | J4-31 | P1.10 / level GPIO output |
+| SYNC_IN | J4-30 | P1.09 / GPIOTE20 input |
+
+RX0 `VDD_GPIO` was measured at approximately 3.3 V and the selected ZYNQ
+Bank13 is 3.3 V/LVCMOS33. RESET_N remains disconnected. These facts support the
+electrical review but do not replace waveform validation.
+
+The CH0 `timebase` runs TIMER20 at 1 MHz. A rising SYNC_IN creates a GPIOTE20
+event routed through GPPI/DPPI directly to TIMER20 CC1 capture; the ISR consumes
+the hardware-captured value. This is distinct from taking a software timestamp
+inside a GPIO ISR.
+
+SPIS uses two complete CS transactions: an 8-byte request and, after at least
+1 ms during initial bring-up, a 260-byte response. Mode 0, MSB first, and 1 MHz
+are frozen for initial testing. Level-high DRDY represents a staged readable
+record; PEEK does not release it, and only a matching COMMIT/DROP advances the
+queue.
+
+The 248-byte record header CRC is CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF,
+no reflection, xorout 0) over bytes 0..37. Do not replace it with Zephyr's
+reflected `crc16_ccitt()` helper. The payload remains CRC32 IEEE over bytes
+40..243.
 
 ## Shared-memory ownership protocol
 
@@ -145,13 +165,15 @@ shared protocol header to prevent future frame-definition drift.
 
 ## Validation boundary
 
-Both TX images and the RX image build successfully with NCS 3.1.0 without
-attached hardware. Hardware validation is still required for pin wiring,
-WHO_AM_I, FIFO interrupt capture, sustained radio loss, and measured power.
-See `rf_link_INTEGRATION_REPORT.md` for the test procedure and acceptance
-criteria.
+The CH0 wireless path has a 30-minute measured baseline; the real no-ACK loss
+rate and intervals are recorded in the root `handoff.md`. FPGA hardware has
+executed the control commands through PEEK. The first record test exposed a
+header CRC algorithm mismatch; the corrected nRF image has been built and
+flashed, but the FPGA was not reprogrammed after the subsequent power cycle, so
+CRC PASS and COMMIT closure remain unverified.
 
-The V2-preview RX also builds without ZYNQ or SYNC hardware. Its host contract
-tests cover sequence wrap/gaps, queue ownership, sync transitions, CRC errors,
-commit rules, and transport wrap. See `rf_link_FUTURE_INTEGRATION.md` for the
-software/hardware boundary and four-channel acceptance procedure.
+Host contract tests cover sequence wrap/gaps, queue ownership, sync transitions,
+CRC errors, commit rules, and transport wrap. Production C ztest source builds,
+but the current host lacks QEMU and therefore has no C runtime PASS. The
+canonical current-state summary is `../docs/PROJECT_CONTEXT.md`; chronological
+evidence remains in `../handoff.md`.

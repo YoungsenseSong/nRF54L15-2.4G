@@ -231,6 +231,10 @@ markdown_extensions:
 # Page tree
 nav:
   - Home: index.md
+  - Project Integration:
+    - Current nRF Context: PROJECT_CONTEXT.md
+    - Workspace Migration: WORKSPACE_MIGRATION.md
+    - Paper Evidence Index: PAPER_EVIDENCE_INDEX.md
   - Product:
     - Introduction: introduction.md
     - Hardware description: hardware.md

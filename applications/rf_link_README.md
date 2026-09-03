@@ -8,18 +8,27 @@ For the merge audit, conflict decisions, shared-memory map, and complete
 hardware test procedure, see
 [`rf_link_INTEGRATION_REPORT.md`](rf_link_INTEGRATION_REPORT.md).
 
+For a new Codex conversation or combined VS Code workspace, start with
+[`../docs/PROJECT_CONTEXT.md`](../docs/PROJECT_CONTEXT.md), then read the last
+sections of [`../handoff.md`](../handoff.md). The migration boundary and
+paper-evidence rules are in
+[`../docs/WORKSPACE_MIGRATION.md`](../docs/WORKSPACE_MIGRATION.md) and
+[`../docs/PAPER_EVIDENCE_INDEX.md`](../docs/PAPER_EVIDENCE_INDEX.md).
+
 ## Applications and tools
 
 - `rf_link_tx`: dual-core MEMS transmitter.
 - `rf_link_tx/flpr_app`: FLPR IIM-42352 acquisition image.
 - `rf_link_rx`: single-core ESB receiver and statistics image.
 - `rf_link_rx/stream.conf`: optional binary accepted-frame UART export.
-- `rf_link_rx/future.conf`: V2 software-preintegration receiver queue, logical synchronization,
-  and FPGA transport abstraction without binding unknown hardware pins.
+- `rf_link_rx/future.conf`: V2 debug/auto-commit receiver queue, logical
+  synchronization, and FPGA transport abstraction.
+- `rf_link_rx/ch0_spis.conf` + `ch0_spis.overlay`: isolated CH0 physical
+  SPIS/DRDY/SYNC build; this does not alter the default wireless build.
 - `rf_link_rx/future_no_transport.conf`: V2-preview receive/sync regression
   build with the debug and SPIS transports disabled.
-- `rf_link_FUTURE_INTEGRATION.md`: implemented boundaries, Connect Kit pin
-  candidates, counters, and hardware acceptance plan.
+- `rf_link_FUTURE_INTEGRATION.md`: implemented boundaries, frozen CH0 mapping,
+  counters, SPI contract, and hardware acceptance plan.
 - `rf_link_ROADMAP.md`: V1 two-board test matrix and V2-V6 development gates.
 - `dump_rx_frames.py`: capture the RX binary stream to CSV.
 - `verify_mems_batches.py`: verify sequence continuity and 4096-sample batch
@@ -111,7 +120,7 @@ Build the optional RX binary stream:
 ```powershell
 west build -p always -d build_rf_link_rx_stream `
   -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
-  -- "-DEXTRA_CONF_FILE=stream.conf"
+  -- "-DEXTRA_CONF_FILE=stream.conf" "-DEXTRA_DTC_OVERLAY_FILE=stream.overlay"
 ```
 
 Build the V2 software-preintegration RX without ZYNQ or a physical SYNC input:
@@ -129,10 +138,26 @@ through a 64-record static queue. Its software SYNC path aligns the first valid
 `BATCH_START` after a capture to logical sample index zero. This is logical
 alignment, not proof of simultaneous remote MEMS sampling.
 
-The current Future backend validates the 248-byte FPGA record and auto-commits
-it without dumping payload bytes to UART. The command-oriented SPIS engine is
-present, but real SPIS/DRDY/SYNC capture is held off until a receiver adapter
-schematic confirms the wiring. See `rf_link_FUTURE_INTEGRATION.md`.
+The Future debug backend validates the 248-byte FPGA record and auto-commits it
+without dumping payload bytes to UART. A separate CH0-only integration build
+enables the physical SPIS00 backend, level DRDY, and GPIOTE-DPPI-TIMER hardware
+SYNC capture without changing the default wireless build:
+
+```powershell
+west build -p always -d build_codex_ch0_spis_crcfix `
+  -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx `
+  -- "-DEXTRA_CONF_FILE=ch0_spis.conf" `
+     "-DEXTRA_DTC_OVERLAY_FILE=ch0_spis.overlay"
+```
+
+This build uses the frozen Connect Kit Rev.A CH0 mapping in `handoff.md`. Build
+success is not board-level SPI, DRDY, or SYNC validation. Its record header uses
+CRC-16/CCITT-FALSE over bytes 0..37; payload CRC32 and the 248-byte layout are
+unchanged. RESET_N is not part of the first bring-up and must remain disconnected.
+
+The CRC-fixed CH0 image has been flashed to RX0, but the FPGA was not reprogrammed
+after the following power cycle. The next hardware action is FPGA reprogramming
+and START_STREAM/PEEK/COMMIT CRC retest, not another protocol change.
 
 These builds do not require attached hardware.
 
@@ -144,6 +169,10 @@ TX requires both images:
 pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\rf_link_tx\zephyr\zephyr.hex
 pyocd load -u <TX_ID> -t nrf54l build_rf_link_tx_mems\flpr_app\zephyr\zephyr.hex
 pyocd load -u <RX_ID> -t nrf54l build_rf_link_rx_mems\rf_link_rx\zephyr\zephyr.hex
+
+# CH0 RX-to-ZYNQ integration image (RX0 only)
+pyocd load -u 820D9A5F0F3BA22B8E4ES -t nrf54l `
+  build_codex_ch0_spis_crcfix\merged.hex
 ```
 
 Use `pyocd list` to obtain `<TX_ID>` and `<RX_ID>`.

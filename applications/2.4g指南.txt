@@ -29,7 +29,7 @@ west build -p always -d build_rf_link_rx_mems -b nrf54l15_connectkit/nrf54l15/cp
 
 RX 完整样本导出版：
 
-west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf"
+west build -p always -d build_rf_link_rx_stream -b nrf54l15_connectkit/nrf54l15/cpuapp applications\rf_link_rx -- "-DEXTRA_CONF_FILE=stream.conf" "-DEXTRA_DTC_OVERLAY_FILE=stream.overlay"
 
 三、烧录
 
