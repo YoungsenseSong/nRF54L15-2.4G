@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <string.h>
+#include <zephyr/app_version.h>
 #include <zephyr/kernel.h>
 
 #include "debug_uart.h"
@@ -26,6 +27,10 @@ static void print_boot_line(void)
 	debug_uart_puts(RF_LINK_NOACK_STREAM ? "noack" : "ack");
 	debug_uart_puts(",channel=");
 	debug_uart_u32(RF_LINK_CHANNEL);
+	debug_uart_puts(",pipe=");
+	debug_uart_u32(RF_LINK_PIPE);
+	debug_uart_puts(",prefix=0x54,fw=");
+	debug_uart_puts(STRINGIFY(APP_BUILD_VERSION));
 	debug_uart_puts(",samples_per_frame=");
 	debug_uart_u32(RF_LINK_FRAME_SAMPLE_COUNT);
 #if defined(CONFIG_RF_LINK_FUTURE_MODE)
@@ -63,6 +68,8 @@ static void print_stats(uint32_t last_bytes, int64_t last_ms)
 	debug_uart_u32(rx_stats.lost_frames);
 	debug_uart_puts(" dup=");
 	debug_uart_u32(rx_stats.duplicates);
+	debug_uart_puts(" late=");
+	debug_uart_u32(rx_stats.late_frames);
 	debug_uart_puts(" bad=");
 	debug_uart_u32(rx_stats.bad_magic + rx_stats.bad_size +
 		       rx_stats.bad_sample_count);
@@ -74,6 +81,8 @@ static void print_stats(uint32_t last_bytes, int64_t last_ms)
 	debug_uart_u32(radio_stats.rx_read_errors);
 	debug_uart_puts(" rf_q_ovf=");
 	debug_uart_u32(radio_stats.rx_queue_overflow);
+	debug_uart_puts(" rf_q_hwm=");
+	debug_uart_u32(radio_stats.rx_queue_high_water);
 	debug_uart_puts(" seq=");
 	debug_uart_u32(rx_stats.last_seq);
 	debug_uart_puts(" first=");
@@ -112,6 +121,8 @@ static void print_future_stats(void)
 	debug_uart_u32(radio_stats.rx_read_errors);
 	debug_uart_puts(" queue_overflow=");
 	debug_uart_u32(radio_stats.rx_queue_overflow);
+	debug_uart_puts(" queue_high_water=");
+	debug_uart_u32(radio_stats.rx_queue_high_water);
 	debug_uart_crlf();
 
 	debug_uart_puts("REORDER extended_frame_seq=");
@@ -172,6 +183,16 @@ static void print_future_stats(void)
 	debug_uart_u32(transport_stats.submit_errors);
 	debug_uart_puts(" stall_ms=");
 	debug_uart_u32(transport_stats.stall_ms);
+	debug_uart_puts(" req_xfer=");
+	debug_uart_u32(transport_stats.request_transactions);
+	debug_uart_puts(" rsp_xfer=");
+	debug_uart_u32(transport_stats.response_transactions);
+	debug_uart_puts(" spi_errors=");
+	debug_uart_u32(transport_stats.spi_errors);
+	debug_uart_puts(" parser_errors=");
+	debug_uart_u32(transport_stats.parser_errors);
+	debug_uart_puts(" short_xfer=");
+	debug_uart_u32(transport_stats.short_transfers);
 	debug_uart_crlf();
 
 	debug_uart_puts("CONTROL armed=");
@@ -289,7 +310,7 @@ int main(void)
 		debug_uart_i32(ret);
 		debug_uart_crlf();
 		if (IS_ENABLED(CONFIG_RF_LINK_FPGA_SPIS)) {
-			debug_uart_puts("SPIS hardware backend needs reviewed board pins and overlay");
+			debug_uart_puts("CH0 SPIS backend init failed; check reviewed overlay and wiring");
 			debug_uart_crlf();
 		}
 		return ret;

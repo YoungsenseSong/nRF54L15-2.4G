@@ -42,9 +42,21 @@ static atomic_t rx_events;
 static atomic_t rx_frames;
 static atomic_t rx_read_errors;
 static atomic_t rx_queue_overflow;
+static atomic_t rx_queue_high_water;
 
 K_MSGQ_DEFINE(radio_rx_msgq, sizeof(struct radio_link_rx_packet),
 	      CONFIG_RF_LINK_RADIO_QUEUE_DEPTH, 8);
+
+static void update_queue_high_water(void)
+{
+	atomic_val_t used = (atomic_val_t)k_msgq_num_used_get(&radio_rx_msgq);
+	atomic_val_t high_water = atomic_get(&rx_queue_high_water);
+
+	while (used > high_water &&
+	       !atomic_cas(&rx_queue_high_water, high_water, used)) {
+		high_water = atomic_get(&rx_queue_high_water);
+	}
+}
 
 static void radio_event_handler(const struct esb_evt *event)
 {
@@ -65,6 +77,8 @@ static void radio_event_handler(const struct esb_evt *event)
 			       MIN((size_t)payload.length, sizeof(packet.frame)));
 			if (k_msgq_put(&radio_rx_msgq, &packet, K_NO_WAIT) != 0) {
 				atomic_inc(&rx_queue_overflow);
+			} else {
+				update_queue_high_water();
 			}
 			atomic_inc(&rx_frames);
 		}
@@ -157,7 +171,8 @@ int radio_link_init(void)
 	static const uint8_t base_addr_0[4] = {0x52, 0x46, 0x4c, 0x31};
 	static const uint8_t base_addr_1[4] = {0xc2, 0xc2, 0xc2, 0xc2};
 	static const uint8_t addr_prefix[8] = {
-		0x54, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8
+		RF_LINK_PIPE_PREFIX, 0xc2, 0xc3, 0xc4,
+		0xc5, 0xc6, 0xc7, 0xc8
 	};
 	struct esb_config config = ESB_DEFAULT_CONFIG;
 	int ret;
@@ -232,6 +247,8 @@ void radio_link_stats_get(struct radio_link_stats *stats)
 	stats->rx_frames = (uint32_t)atomic_get(&rx_frames);
 	stats->rx_read_errors = (uint32_t)atomic_get(&rx_read_errors);
 	stats->rx_queue_overflow = (uint32_t)atomic_get(&rx_queue_overflow);
+	stats->rx_queue_high_water =
+		(uint32_t)atomic_get(&rx_queue_high_water);
 }
 
 const char *radio_link_phy_label(void)

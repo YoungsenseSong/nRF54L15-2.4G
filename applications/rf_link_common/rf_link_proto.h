@@ -11,6 +11,8 @@
 #define RF_LINK_FRAME_FLAGS_BATCH_START  BIT(2)
 #define RF_LINK_FRAME_FLAGS_BATCH_END    BIT(3)
 #define RF_LINK_CHANNEL                  40u
+#define RF_LINK_PIPE                     0u
+#define RF_LINK_PIPE_PREFIX              0x54u
 #define RF_LINK_MEMS_AXIS_COUNT          3u
 #define RF_LINK_MEMS_ODR_HZ              4000u
 #define RF_LINK_TARGET_SAMPLE_HZ         (RF_LINK_MEMS_AXIS_COUNT * RF_LINK_MEMS_ODR_HZ)

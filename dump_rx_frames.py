@@ -11,7 +11,7 @@ from serial.tools import list_ports
 
 
 DEFAULT_OUTPUT_DIR = Path(r"D:\nRF54L15\NCS-Project\nrf54l15-connectkit\2.4g_results")
-DEFAULT_BAUD = 2_000_000
+DEFAULT_BAUD = 1_000_000
 DEFAULT_PORT = "COM7"
 DEFAULT_SAMPLE_COLUMNS = 96
 STREAM_MAGIC = 0x31535852

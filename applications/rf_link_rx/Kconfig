@@ -3,8 +3,7 @@ menu "RF Link RX options"
 config RF_LINK_RADIO_QUEUE_DEPTH
 	int "Deferred radio packet queue depth"
 	range 4 128
-	default 64 if RF_LINK_FUTURE_MODE
-	default 16
+	default 64
 	help
 	  Number of raw ESB packets that can be deferred from the ESB event ISR to
 	  thread context. A full queue drops the new packet and increments an
@@ -22,10 +21,11 @@ config RF_LINK_RX_SAMPLE_STREAM
 config RF_LINK_RX_SAMPLE_STREAM_UART_BAUD
 	int "RX sample stream UART baud rate"
 	depends on RF_LINK_RX_SAMPLE_STREAM
-	range 115200 4000000
-	default 2000000
+	range 115200 1000000
+	default 1000000
 	help
-	  UART baud rate used when the RX sample stream is enabled.
+	  UART baud rate used when the RX sample stream is enabled. The current
+	  nRF54L15 Connect Kit UARTE clock supports at most 1000000 baud.
 
 config RF_LINK_RX_SAMPLE_STREAM_BUFFERED_RECORDS
 	int "Number of buffered RX stream records"
@@ -95,9 +95,8 @@ config RF_LINK_SYNC_HW_CAPTURE
 	depends on RF_LINK_SYNC_MANAGER
 	default n
 	help
-	  Reserved for a board overlay that defines the actual SYNC_IN pin, TIMER,
-	  GPIOTE, and DPPI route. The current Connect Kit build intentionally leaves
-	  this off because the receiver schematic and pin assignment are unknown.
+	  Use a dedicated GPIOTE IN event and a DPPI-routed TIMER capture task.
+	  This must only be selected with the reviewed CH0 Connect Kit overlay.
 
 config RF_LINK_FPGA_TRANSPORT
 	bool "FPGA record transport abstraction"
@@ -119,10 +118,22 @@ config RF_LINK_DEBUG_UART_TRANSPORT
 
 config RF_LINK_FPGA_SPIS
 	bool "V2-preview command-oriented SPIS backend"
+	depends on SPI && GPIO
 	help
-	  Select only after a receiver-board overlay defines SPIS, DRDY, and pinctrl.
-	  The protocol engine is present now, but the physical backend is deliberately
-	  not bound to an invented Connect Kit pin assignment.
+	  Enable the physical two-transaction SPIS backend and level DRDY output.
+	  Select only with a reviewed receiver-board overlay.
+
+config RF_LINK_FPGA_SPIS_THREAD_STACK_SIZE
+	int "CH0 SPIS worker stack size"
+	depends on RF_LINK_FPGA_SPIS
+	range 1536 8192
+	default 3072
+
+config RF_LINK_FPGA_SPIS_THREAD_PRIORITY
+	int "CH0 SPIS worker preemptive priority"
+	depends on RF_LINK_FPGA_SPIS
+	range 0 15
+	default 5
 
 endchoice
 

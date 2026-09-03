@@ -10,6 +10,10 @@
 #include "link_control.h"
 #include "timebase.h"
 
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+#include "fpga_spis_backend.h"
+#endif
+
 static struct k_spinlock transport_lock;
 static struct transport_stats transport_stats_data;
 static uint32_t next_transport_seq;
@@ -19,8 +23,8 @@ static bool transport_initialized;
 
 static uint16_t header_crc(const struct fpga_record_header *header)
 {
-	return crc16_ccitt(0xffffu, (const uint8_t *)header,
-			 offsetof(struct fpga_record_header, header_crc16));
+	return crc16(0x1021u, 0xffffu, (const uint8_t *)header,
+		     offsetof(struct fpga_record_header, header_crc16));
 }
 
 int fpga_transport_build_record(const struct rx_frame_record *source,
@@ -134,17 +138,29 @@ static const struct fpga_transport_api debug_backend = {
 
 static int spis_backend_init(void)
 {
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+	return fpga_spis_backend_init();
+#else
 	return -ENOTSUP;
+#endif
 }
 
 static bool spis_backend_ready(void)
 {
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+	return fpga_spis_backend_ready();
+#else
 	return false;
+#endif
 }
 
 static int spis_backend_submit(const struct fpga_record *record)
 {
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+	return fpga_spis_backend_submit(record, pending_extended_frame_seq);
+#else
 	return fpga_spi_transport_stage(record, pending_extended_frame_seq);
+#endif
 }
 
 static int spis_backend_get_command(struct fpga_command *command)
@@ -156,6 +172,9 @@ static int spis_backend_get_command(struct fpga_command *command)
 static void spis_backend_get_stats(struct transport_stats *stats)
 {
 	struct fpga_spi_transport_stats spi_stats;
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+	struct fpga_spis_backend_stats physical_stats;
+#endif
 
 	if (stats == NULL) {
 		return;
@@ -165,6 +184,14 @@ static void spis_backend_get_stats(struct transport_stats *stats)
 	stats->crc_errors += spi_stats.crc_errors;
 	stats->invalid_cmd += spi_stats.invalid_cmd;
 	stats->duplicate_commit += spi_stats.duplicate_commit;
+#if defined(CONFIG_RF_LINK_FPGA_SPIS) && CONFIG_RF_LINK_FPGA_SPIS
+	fpga_spis_backend_get_stats(&physical_stats);
+	stats->request_transactions += physical_stats.request_transactions;
+	stats->response_transactions += physical_stats.response_transactions;
+	stats->spi_errors += physical_stats.spi_errors;
+	stats->parser_errors += physical_stats.parser_errors;
+	stats->short_transfers += physical_stats.short_transfers;
+#endif
 }
 
 static const struct fpga_transport_api spis_backend = {

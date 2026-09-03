@@ -23,3 +23,7 @@ site
 
 # macOS internals
 .DS_Store
+
+# Local board references and writing inputs; keep source-facing summaries in docs/.
+/*.docx
+/*.pdf

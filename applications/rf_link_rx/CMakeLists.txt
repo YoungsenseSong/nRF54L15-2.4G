@@ -27,6 +27,10 @@ target_sources_ifdef(CONFIG_RF_LINK_FUTURE_MODE app PRIVATE
   src/link_control.c
 )
 
+target_sources_ifdef(CONFIG_RF_LINK_FPGA_SPIS app PRIVATE
+  src/fpga_spis_backend.c
+)
+
 target_include_directories(app PRIVATE
   src
   ${CMAKE_CURRENT_SOURCE_DIR}/../rf_link_common

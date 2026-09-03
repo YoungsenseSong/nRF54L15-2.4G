@@ -16,6 +16,10 @@ BUILD_ASSERT(sizeof(struct rx_sample_stream_record) == 224u,
 
 #if IS_ENABLED(CONFIG_RF_LINK_RX_SAMPLE_STREAM)
 
+BUILD_ASSERT(DT_PROP(RX_SAMPLE_STREAM_UART_NODE, current_speed) ==
+	     CONFIG_RF_LINK_RX_SAMPLE_STREAM_UART_BAUD,
+	     "stream devicetree baud must match the stream Kconfig baud");
+
 static const struct device *const uart_dev =
 	DEVICE_DT_GET_OR_NULL(RX_SAMPLE_STREAM_UART_NODE);
 K_MSGQ_DEFINE(stream_msgq, sizeof(struct rx_sample_stream_record),
@@ -24,20 +28,47 @@ static K_THREAD_STACK_DEFINE(stream_thread_stack,
 			     CONFIG_RF_LINK_RX_SAMPLE_STREAM_THREAD_STACK_SIZE);
 static struct k_thread stream_thread;
 static atomic_t stream_drop_total;
+static atomic_t stream_tx_failed;
 static bool stream_active;
 static uint32_t stream_frame_index;
+K_SEM_DEFINE(stream_tx_done, 0, 1);
 
-static void uart_write_buf(const uint8_t *buf, size_t len)
+static void uart_event_handler(const struct device *dev,
+			       struct uart_event *event,
+			       void *user_data)
 {
-	size_t i;
+	ARG_UNUSED(dev);
+	ARG_UNUSED(user_data);
+
+	switch (event->type) {
+	case UART_TX_DONE:
+		k_sem_give(&stream_tx_done);
+		break;
+	case UART_TX_ABORTED:
+		atomic_set(&stream_tx_failed, 1);
+		k_sem_give(&stream_tx_done);
+		break;
+	default:
+		break;
+	}
+}
+
+static int uart_write_buf(const uint8_t *buf, size_t len)
+{
+	int ret;
 
 	if (buf == NULL || !stream_active) {
-		return;
+		return -EINVAL;
 	}
 
-	for (i = 0; i < len; i++) {
-		uart_poll_out(uart_dev, buf[i]);
+	atomic_clear(&stream_tx_failed);
+	ret = uart_tx(uart_dev, buf, len, SYS_FOREVER_US);
+	if (ret != 0) {
+		return ret;
 	}
+
+	(void)k_sem_take(&stream_tx_done, K_FOREVER);
+	return atomic_get(&stream_tx_failed) != 0 ? -EIO : 0;
 }
 
 static void stream_thread_entry(void *arg1, void *arg2, void *arg3)
@@ -50,21 +81,14 @@ static void stream_thread_entry(void *arg1, void *arg2, void *arg3)
 
 	while (1) {
 		(void)k_msgq_get(&stream_msgq, &record, K_FOREVER);
-		uart_write_buf((const uint8_t *)&record, sizeof(record));
+		if (uart_write_buf((const uint8_t *)&record, sizeof(record)) != 0) {
+			atomic_inc(&stream_drop_total);
+		}
 	}
 }
 
 int rx_sample_stream_init(void)
 {
-	struct uart_config cfg = {
-		.baudrate = CONFIG_RF_LINK_RX_SAMPLE_STREAM_UART_BAUD,
-		.parity = UART_CFG_PARITY_NONE,
-		.stop_bits = UART_CFG_STOP_BITS_1,
-		.data_bits = UART_CFG_DATA_BITS_8,
-		.flow_ctrl = UART_CFG_FLOW_CTRL_NONE,
-	};
-	int ret;
-
 	if (stream_active) {
 		return 0;
 	}
@@ -73,12 +97,12 @@ int rx_sample_stream_init(void)
 		return -ENODEV;
 	}
 
-	ret = uart_configure(uart_dev, &cfg);
-	if (ret != 0) {
-		return ret;
+	if (uart_callback_set(uart_dev, uart_event_handler, NULL) != 0) {
+		return -ENOTSUP;
 	}
 
 	atomic_clear(&stream_drop_total);
+	atomic_clear(&stream_tx_failed);
 	stream_frame_index = 0u;
 	stream_active = true;
 

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <zephyr/cache.h>
+#include <zephyr/app_version.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/barrier.h>
 #include <zephyr/sys/crc.h>
@@ -43,6 +44,10 @@ static void print_boot_line(void)
 	debug_uart_puts(RF_LINK_NOACK_STREAM ? "noack" : "ack");
 	debug_uart_puts(",channel=");
 	debug_uart_u32(RF_LINK_CHANNEL);
+	debug_uart_puts(",pipe=");
+	debug_uart_u32(RF_LINK_PIPE);
+	debug_uart_puts(",prefix=0x54,fw=");
+	debug_uart_puts(STRINGIFY(APP_BUILD_VERSION));
 	debug_uart_puts(",batch_samples=");
 	debug_uart_u32(RF_LINK_MEMS_BATCH_SAMPLE_COUNT);
 	debug_uart_puts(",samples_per_frame=");

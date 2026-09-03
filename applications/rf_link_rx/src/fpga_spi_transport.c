@@ -21,8 +21,8 @@ static bool abort_requested;
 
 static uint16_t record_header_crc(const struct fpga_record_header *header)
 {
-	return crc16_ccitt(0xffffu, (const uint8_t *)header,
-			 offsetof(struct fpga_record_header, header_crc16));
+	return crc16(0x1021u, 0xffffu, (const uint8_t *)header,
+		     offsetof(struct fpga_record_header, header_crc16));
 }
 
 static bool record_crc_valid(const struct fpga_record *record)
@@ -219,6 +219,16 @@ bool fpga_spi_transport_pending(void)
 
 	k_spin_unlock(&spi_lock, key);
 	return pending;
+}
+
+uint32_t fpga_spi_transport_pending_seq(void)
+{
+	k_spinlock_key_t key = k_spin_lock(&spi_lock);
+	uint32_t seq = have_pending_record ?
+		pending_record.header.transport_seq : UINT32_MAX;
+
+	k_spin_unlock(&spi_lock, key);
+	return seq;
 }
 
 void fpga_spi_transport_abort_pending(void)

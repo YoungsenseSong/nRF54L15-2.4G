@@ -1,0 +1,14 @@
+description: CH0 FPGA sideband GPIOs for the RF Link receiver
+
+compatible: "makerdiary,rf-link-ch0-interface"
+
+properties:
+  drdy-gpios:
+    type: phandle-array
+    required: true
+    description: Active-high level indicating a pending PEEK record
+
+  sync-gpios:
+    type: phandle-array
+    required: true
+    description: Active-high external synchronization input

@@ -18,6 +18,7 @@ struct radio_link_stats {
 	uint32_t rx_frames;
 	uint32_t rx_read_errors;
 	uint32_t rx_queue_overflow;
+	uint32_t rx_queue_high_water;
 };
 
 int radio_link_init(void);

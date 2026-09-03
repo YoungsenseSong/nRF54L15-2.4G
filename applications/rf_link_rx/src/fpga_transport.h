@@ -14,6 +14,11 @@ struct transport_stats {
 	uint32_t duplicate_commit;
 	uint32_t submit_errors;
 	uint32_t stall_ms;
+	uint32_t request_transactions;
+	uint32_t response_transactions;
+	uint32_t spi_errors;
+	uint32_t parser_errors;
+	uint32_t short_transfers;
 };
 
 struct fpga_transport_api {

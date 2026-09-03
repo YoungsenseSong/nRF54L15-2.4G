@@ -1,0 +1,7 @@
+/*
+ * Stream-only UART rate selection. Pin routing remains defined by the board
+ * and the application's normal board overlay.
+ */
+&uart30 {
+	current-speed = <1000000>;
+};
