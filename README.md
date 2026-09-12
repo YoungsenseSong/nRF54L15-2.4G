@@ -1,5 +1,7 @@
 # nRF54L15 Private 2.4G Wireless Data Link
 
+> 团队开发交接版：先读 [TEAM_HANDOFF.md](TEAM_HANDOFF.md) 和 [验证摘要](HANDOFF_VALIDATION.md)。当前 CH0 生产基线构建通过；r8 恢复候选未集成，不能据此声称恢复或持续无损已板测。
+
 基于 nRF54L15 Connect Kit 的私有 2.4 GHz 无线数据链路。当前成熟路径由
 IIM-42352 三轴 MEMS、双核 TX 和单核 RX 组成：FLPR 连续采集，累计 4096 个
 `int16_t` 样本后通过共享内存 + ICMsg 通知 CPUAPP；CPUAPP 从 System ON idle
