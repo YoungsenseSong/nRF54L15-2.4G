@@ -1,0 +1,122 @@
+/ {
+	chosen {
+		zephyr,console = &uart00;
+		zephyr,shell-uart = &uart00;
+	};
+
+	soc {
+		reserved-memory {
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
+
+			/* FLPR code partition */
+			cpuflpr_code_partition: image@165000 {
+				reg = <0x165000 0x18000>; /* 96 KB */
+			};
+
+			/* ICMSG shared memory: HP receives here */
+			sram_rx: memory@20018000 {
+				reg = <0x20018000 0x0800>;
+			};
+
+			/* ICMSG shared memory: HP transmits here */
+			sram_tx: memory@20020000 {
+				reg = <0x20020000 0x0800>;
+			};
+
+			/* LP runtime trace shared with HP for diagnostics */
+			rf_link_lp_trace_mem: memory@20020800 {
+				reg = <0x20020800 0x0100>;
+			};
+
+			/* Ping-pong MEMS batches written by FLPR and read by CPUAPP. */
+			rf_link_mems_slot0: memory@20021000 {
+				reg = <0x20021000 0x2100>;
+			};
+
+			rf_link_mems_slot1: memory@20023100 {
+				reg = <0x20023100 0x2100>;
+			};
+		};
+
+		/* FLPR execution SRAM */
+		cpuflpr_sram_code_data: memory@20028000 {
+			compatible = "mmio-sram";
+			reg = <0x20028000 0x18000>; /* 96 KB */
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0x0 0x20028000 0x18000>;
+		};
+
+		ipc {
+			ipc0: ipc0 {
+				compatible = "zephyr,ipc-icmsg";
+				dcache-alignment = <32>;
+				tx-region = <&sram_tx>;
+				rx-region = <&sram_rx>;
+				mboxes = <&cpuapp_vevif_rx 20>, <&cpuapp_vevif_tx 21>;
+				mbox-names = "rx", "tx";
+				status = "okay";
+			};
+		};
+	};
+};
+
+/* TX custom board UART: MCU_UART_RX=P2.00, MCU_UART_TX=P2.02. */
+&pinctrl {
+	uart00_tx_board_default: uart00_tx_board_default {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 2, 2)>;
+		};
+		group2 {
+			psels = <NRF_PSEL(UART_RX, 2, 0)>;
+			bias-pull-up;
+		};
+	};
+
+	uart00_tx_board_sleep: uart00_tx_board_sleep {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 2, 2)>,
+				<NRF_PSEL(UART_RX, 2, 0)>;
+			low-power-enable;
+		};
+	};
+};
+
+&cpuapp_sram {
+	reg = <0x20000000 0x28000>; /* 160 KB */
+	ranges = <0x0 0x20000000 0x28000>;
+};
+
+&cpuflpr_vpr {
+	status = "okay";
+	execution-memory = <&cpuflpr_sram_code_data>;
+	source-memory = <&cpuflpr_code_partition>;
+};
+
+&cpuapp_vevif_rx {
+	status = "okay";
+};
+
+&cpuapp_vevif_tx {
+	status = "okay";
+};
+
+/* Serial instance 30 is owned by FLPR as SPIM30 for IIM-42352 sampling. */
+&spi30 {
+	status = "disabled";
+};
+
+&uart30 {
+	status = "disabled";
+};
+
+&uart00 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart00_tx_board_default>;
+	pinctrl-1 = <&uart00_tx_board_sleep>;
+	pinctrl-names = "default", "sleep";
+	/delete-property/ hw-flow-control;
+};

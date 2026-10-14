@@ -1,5 +1,17 @@
 # nRF54L15 Private 2.4G Wireless Data Link
 
+## 2026-10-14 Current Project
+
+The current paired custom-board TX and repaired CH0 SPIS RX are in
+[`releases/20261014/single_channel`](releases/20261014/single_channel).
+Use its `BUILD_NRF.ps1` and UID-checked `FLASH_NRF.ps1`. The repaired RX
+clean-build HEX reproduces the retained tested image. TX CPUAPP and FLPR
+build successfully; the retained TX images are not replaced by this release.
+This publication does not claim lossless RF, multichannel synchronization,
+or a newly verified TX Flash readback.
+
+The older handoff below describes the earlier production baseline.
+
 > 团队开发交接版：先读 [TEAM_HANDOFF.md](TEAM_HANDOFF.md) 和 [验证摘要](HANDOFF_VALIDATION.md)。当前 CH0 生产基线构建通过；r8 恢复候选未集成，不能据此声称恢复或持续无损已板测。
 
 基于 nRF54L15 Connect Kit 的私有 2.4 GHz 无线数据链路。当前成熟路径由

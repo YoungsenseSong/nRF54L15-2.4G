@@ -1,0 +1,12 @@
+/ {
+	chosen {
+		zephyr,console = &uart30;
+		zephyr,shell-uart = &uart30;
+	};
+};
+
+&uart30 {
+	status = "okay";
+	current-speed = <115200>;
+	/delete-property/ hw-flow-control;
+};

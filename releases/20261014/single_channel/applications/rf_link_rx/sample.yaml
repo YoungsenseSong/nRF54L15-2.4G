@@ -1,0 +1,33 @@
+sample:
+  name: RF Link RX
+tests:
+  application.rf_link_rx:
+    build_only: true
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_stream:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=stream.conf
+      - EXTRA_DTC_OVERLAY_FILE=stream.overlay
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_v2_preview:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=future.conf
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_v2_preview_no_transport:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=future_no_transport.conf
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp
+  application.rf_link_rx_ch0_spis:
+    build_only: true
+    extra_args:
+      - EXTRA_CONF_FILE=ch0_spis.conf
+      - EXTRA_DTC_OVERLAY_FILE=ch0_spis.overlay
+    integration_platforms:
+      - nrf54l15_connectkit/nrf54l15/cpuapp

@@ -1,0 +1,86 @@
+/ {
+	soc {
+		reserved-memory {
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			sram_tx: memory@20018000 {
+				reg = <0x20018000 0x0800>;
+			};
+
+			sram_rx: memory@20020000 {
+				reg = <0x20020000 0x0800>;
+			};
+
+			rf_link_lp_trace_mem: memory@20020800 {
+				reg = <0x20020800 0x0100>;
+			};
+
+			rf_link_mems_slot0: memory@20021000 {
+				reg = <0x20021000 0x2100>;
+			};
+
+			rf_link_mems_slot1: memory@20023100 {
+				reg = <0x20023100 0x2100>;
+			};
+		};
+	};
+
+	ipc {
+		ipc0: ipc0 {
+			compatible = "zephyr,ipc-icmsg";
+			dcache-alignment = <32>;
+			tx-region = <&sram_tx>;
+			rx-region = <&sram_rx>;
+			mboxes = <&cpuflpr_vevif_rx 21>, <&cpuflpr_vevif_tx 20>;
+			mbox-names = "rx", "tx";
+			status = "okay";
+		};
+	};
+};
+
+&cpuflpr_vevif_rx {
+	status = "okay";
+};
+
+&cpuflpr_vevif_tx {
+	status = "okay";
+};
+
+&pinctrl {
+	spi30_default: spi30_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 3)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 2)>,
+				<NRF_PSEL(SPIM_MISO, 0, 1)>;
+		};
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+/* P0.02 is SPIM30 MOSI in this product wiring, not the board LED. */
+&led0 {
+	status = "disabled";
+};
+
+&spi30 {
+	compatible = "nordic,nrf-spim";
+	status = "okay";
+	pinctrl-0 = <&spi30_default>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+
+	mems_sensor: iim42352@0 {
+		compatible = "tdk,iim42352";
+		reg = <0>;
+		spi-max-frequency = <8000000>;
+		int1-gpios = <&gpio0 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+	};
+};
+
+&uart30 {
+	status = "disabled";
+};
