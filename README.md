@@ -62,6 +62,16 @@ The Makerdiary nRF54L15 Connect Kit repository remains the board-support base.
 | `verify_mems_batches.py` | Verify 4096-sample batch boundaries and sequence. |
 | `save_serial_csv.py` | TX/RX text status capture. |
 
+### Synchronization coordinator
+
+The reproducible minimal wireless synchronization project is in
+[`applications/sync_minimal`](applications/sync_minimal). It builds three roles:
+an RX1 coordinator, an RX2 responder, and a TX1 responder. The project uses a
+separate ESB channel-40 frame format and does not change the production RX/TX
+wire protocol. The RX1-to-RX2 protocol window was observed successfully on
+2026-10-18; TX1 dual-responder participation and oscilloscope edge-difference
+measurement remain open.
+
 ## Current architecture
 
 ```text

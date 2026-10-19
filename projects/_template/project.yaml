@@ -1,0 +1,16 @@
+name: <project_name>
+title: <工程名称>
+type: fpga  # fpga | mcu | embedded | mixed
+status: planning  # planning | active | verified | archived
+owner: Oliver
+created: YYYY-MM-DD
+board: <开发板或 N/A>
+device: <芯片型号>
+toolchain:
+  - <工具和版本>
+entry_docs:
+  design: docs/design.md
+  spec: docs/spec.md
+  getting_started: docs/getting-started.md
+  verification: docs/verification.md
+  changes: docs/changes

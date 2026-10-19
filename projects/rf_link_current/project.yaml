@@ -1,0 +1,18 @@
+name: rf_link_current
+title: nRF54L15 当前无线采集链路
+type: embedded
+status: active
+owner: Oliver
+created: 2026-10-19
+board: Makerdiary nRF54L15 Connect Kit and custom TX/RX boards
+device: nRF54L15
+toolchain:
+  - Nordic Connect SDK / Zephyr
+  - west
+  - nRF54L15 CPUAPP + FLPR
+entry_docs:
+  design: docs/design.md
+  spec: docs/spec.md
+  getting_started: docs/getting-started.md
+  verification: docs/verification.md
+  changes: docs/changes

@@ -1,0 +1,17 @@
+name: sync_minimal
+title: Wireless synchronization coordinator prototype
+type: embedded
+status: active
+owner: Oliver
+created: 2026-10-19
+board: nRF54L15 Connect Kit and custom TX1
+device: nRF54L15
+toolchain:
+  - Nordic Connect SDK / Zephyr
+  - west
+entry_docs:
+  design: docs/design.md
+  spec: docs/spec.md
+  getting_started: README.md
+  verification: docs/verification.md
+  changes: docs/changes

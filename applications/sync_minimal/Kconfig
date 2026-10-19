@@ -1,0 +1,21 @@
+menuconfig SYNC_MINIMAL_COORDINATOR
+	bool "Build the RX1 wireless sync coordinator"
+	default n
+
+config SYNC_MINIMAL_CHANNEL
+	int "ESB radio channel"
+	default 40
+
+config SYNC_MINIMAL_PERIOD_MS
+	int "Coordinator broadcast period"
+	default 100
+
+config SYNC_MINIMAL_PULSE_DELAY_US
+	int "Hardware pulse delay after RADIO ADDRESS"
+	default 2000
+
+config SYNC_MINIMAL_PULSE_PIN
+	int "Physical GPIO pin number (P1.09 => 41)"
+	default 41
+
+source "Kconfig.zephyr"
